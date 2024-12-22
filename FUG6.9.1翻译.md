@@ -4747,13 +4747,1383 @@ AGE 粒子或液滴存在的秒数，计算中将删除该粒子或液滴。在�
 
 ### Particles or Droplets Introduced at a Sprinkler or Nozzle
 
+使用 PROP 线描述设备的特征，使用 DEVC 线确定设备在计算域中的位置和方向，从而将洒水器或喷嘴添加到仿真中。PARTICLES_PER_SECOND 是每个活动喷头或喷嘴每秒插入的水滴数量（默认为 5000）。它列在 PROP 行中，其中包括喷洒器或喷嘴的其他属性。请注意，该参数只影响喷头和喷嘴。更改该参数不会改变流速，但会改变用于表示流量的水滴数量。在某些模拟中，最好将 PARTICLES_PER_SECOND 增加到默认值以上，这样粒子/液滴质量在域内的分布会更均匀。如果该参数过小，可能会导致非物理蒸发模式，有时甚至会导致数值不稳定。如果在启动喷洒器或喷嘴后不久遇到数值不稳定性，可考虑增大 PARTICLES_PER_SECOND，以产生更平滑、更逼真的蒸发模式。请记住，对于真实的洒水器或喷嘴，每秒产生的水滴要比模拟的多得多。
+
+PROP 行中指定的 PARTICLE_VELOCITY 表示液滴/粒子的初始速度。如果该值相对较大，FDS 将通过气相时间步长的子步长来计算液滴/粒子的轨迹，以确保液滴/粒子在一个子时间步长内穿越的网格单元不超过一个。MISC 行的参数 PARTICLE_CFL 对时间步长的限制更为严格，默认设置为 F（见第 19.3.3 节）。如果为 T，则气相时间步长受粒子 CFL 限制。通常情况下，没有必要限制气相时间步长以考虑快速液滴/粒子--亚时间步长通常就足够了。
+
+### Particles or Droplets Introduced within a Volume
+
+有时，在域的特定区域内引入拉格朗日粒子会很方便。为此，请使用 INIT 行，其中包含要插入的粒子类型的 PART_ID。通过 INIT 行指定的粒子可以代表多种不同类型的子网格尺度对象。粒子可以是无质量的示踪剂，也可以是有质量的固体或液体粒子。如果不是无质量粒子，则以 kg/m3 为单位指定 MASS_PER_VOLUME。请勿将该参数与下一节中解释的 “密度”（DENSITY）相混淆。例如，水的密度（DENSITY）为 1000 kg/m3，而一升水分解成水滴并扩散到一立方米的体积（MASS_PER_VOLUME）为 1 kg/m3。插入的拉格朗日粒子数量由参数 N_PARTICLES 控制。
+
+**Randomly Distributed Particles within a Specified Volume**
+
+INIT 行中的参数 N_PARTICLES 表示在域的指定区域内插入的粒子数量。根据参数 SHAPE =（'BLOCK'[^15-4]、'CYLINDER'、'CONE'、'LINE'、'RING'），该区域可以有多种形状。对于 “BLOCK”、“CONE ”和 “RING”，粒子位置默认为随机分布。对于 “RING”，可以通过在 INIT 行中设置 UNIFORM=T 来统一粒子的位置。默认情况下，区域是一个矩形的 “BLOCK”，用实数六元组 XB 指定。XB 的格式与 OBST 行的格式相同。
+
+```fortran
+&INIT PART_ID='my particles', XB=..., N_PARTICLES=..., MASS_PER_VOLUME=... /
+```
+
+请注意，指定区域的体积是根据 SHAPE 尺寸计算的，与该区域内是否有实体障碍物无关。还需要注意的是，在大多数应用中，粒子的数量 N_PARTICLES 在某种程度上是任意的，但应选择为每个网格单元至少提供几个粒子。然后，FDS 会自动为每个粒子分配一个加权系数，以确保达到 MASS_PER_VOLUME。另一方面，在某些应用中，指定粒子数量可能非常重要。例如，如果使用粒子来模拟电缆燃烧，则可能需要指定实际燃烧的电缆数量。MASS_PER_VOLUME 可以通过 INIT 行的斜坡函数 RAMP_PART 来上下调节。
+
+如果六元组 XB 指定的体跨越网格边界，**请注意 N_PARTICLES 指的是整个体，而不仅仅是特定网格内的体**。FDS 会自动计算分配给每个网格所需的粒子数。
+
+或者，您也可以指定 SHAPE=“CONE”，这样粒子就会随机分布在一个垂直的圆锥体内。这主要用于表现树木。圆锥体的尺寸通过参数 RADIUS、HEIGHT 和基准位置 XYZ 来指定。后者是一个实数三元组，指定了圆锥体底部中心点。下面举例说明如何制作一棵树：
+
+```fortran
+&PART ID='tree crown foliage',
+DRAG_LAW='CYLINDER',
+SURF_ID='needles',
+QUANTITIES='PARTICLE TEMPERATURE','PARTICLE MASS','PARTICLE DIAMETER',
+STATIC=T,
+COLOR='FOREST GREEN' /
+&INIT PART_ID='tree crown foliage',
+XYZ=0.0,0.0,0.0,
+RADIUS=1,
+HEIGHT=2,
+SHAPE='CONE',
+N_PARTICLES_PER_CELL=1,
+CELL_CENTERED=T,
+MASS_PER_VOLUME=2.0 /
+```
+
+请注意，在本示例中，每个网格单元都指定了一个颗粒，位置正好位于单元的中心。单个颗粒实际代表的松针数量取决于指定的 MASS_PER_VOLUME 和单个圆柱形颗粒的质量。该信息将由 SURF 行 “needles ”提供。
+
+此外，对于 “CONE ”和 “CYLINDER ”形状，还可以指定 INNER_RADIUS。这将删除一个具有指定内半径的同心体，留下一个圆锥形或圆柱形外壳。如果树冠的叶子集中在体积的外部，这将非常有用。需要注意的是，MASS_PER_VOLUME 只适用于外壳所占的体积，因此在指定固定 MASS_PER_VOLUME 的 INNER_RADIUS 时，树冠的总质量会减少。不同树冠几何形状的示例可在 fds/Verification/WUI/ 目录中的 tree_shapes.fds 验证案例中找到。
+
+**Specifying a Fixed Number of Particles per Grid Cell**
+
+在一些特殊应用中，您可能需要指定 N_PARTICLES_PER_CELL，以表示指定区域中每个网格单元内的粒子数量。使用 N_PARTICLES_PER_CELL 时，粒子将随机放置在每个单元格中。如果设置 CELL_CENTERED=T，粒子将被放置在每个单元格的中心。
+
+**Specifying aWeight Factor for Particles**
+
+使用 PARTICLE_WEIGHT_FACTOR 来指定每个计算粒子所代表的实际粒子数量。这可以与 N_PARTICLES_PER_CELL 结合使用，以在同一网格单元中放置大量相同粒子时降低计算成本。
+
+**Single Particle Insertion**
+
+如果只引入一个粒子（这通常是创建一个目标的简便方法），可以使用实数三元组 XYZ 而不是 XB 来指定粒子的位置。您可以使用实数三元组 UVW 为单个粒子赋予初始速度。您还可以添加 DX、DY 和/或 DZ 来创建一排粒子，这些粒子与 XYZ 的偏移量以米为单位递增。例如
+
+```fortran
+&INIT PART_ID='target', XYZ=1.2,3.4,5.6, N_PARTICLES=10, DX=0.1 /
+```
+
+从点（1.2,3.4,5.6）开始创建一条由 10 个粒子组成的直线，粒子间距为 0.1 米。详见第 22.10.12 节。
+在特殊情况下，您可能希望在激活特定装置后，每隔 DT_INSERT s 在特定点以特定速度插入一个液滴，如下所示：
+
+```fortran
+&INIT N_PARTICLES=1, XYZ=..., UVW=..., DIAMETER=200., DT_INSERT=0.05,
+PART_ID='drops', DEVC_ID='nozzle' /
+```
+
+请注意，INIT 行上的 DIAMETER (μm) 仅对液滴有效。它优先于标有 “drops ”的 PART 行上的 DIAMETER。名为 bucket_test_3 的简单测试用例演示了这一功能，其中水滴从一个共同点向不同方向发射。水滴的大小、速度、插入频率和质量通量各不相同，并检查水的质量是否保持不变（见图 15.6）。
+
+![image-20241222093347251](./../FUG6.9.1翻译.assets/image-20241222093347251.png)
+
+**Periodic Insertion of Particles within a Specified Volume**
+
+如果您希望在给定区域内周期性地引入粒子，而不仅仅是在初始阶段，请将 INIT 行中的 DT_INSERT 设置为正值，表示插入的时间增量（秒）。参数 N_PARTICLES 现在表示每 DT_INSERT 秒插入的液滴/粒子的数量。如果液滴/微粒有质量，则使用 MASS_PER_TIME (kg/s) 而不是 MASS_PER_VOLUME 来表示每秒插入的质量。可以使用 INIT 行上的斜坡函数 RAMP_PART 来上下调整该参数。
+
+如果希望延迟液滴的插入，可以在 INIT 行中使用 DEVC_ID 或 CTRL_ID 来命名控制设备。有关控制设备的更多信息，请参见第 18.4 节。
+
+**Controlled Particle Movement**
+
+粒子可以是静态、无质量的示踪剂（随波逐流），也可以是巨大的液滴或热厚的固体（受到阻力），还可以由 PATH_RAMP 控制其位置。当热源或质量源的位置随时间发生变化时，这种方法就会派上用场。或者，您可能希望 DEVC 测量位置随时间变化；DEVC 可以通过带有 PATH_RAMP 的 INIT 线与粒子相连，我们接下来将讨论这一点。
+
+INIT 参数 PATH_RAMP(1:3)是一个由三个字符串组成的列表，表示与粒子的 x、y 和 z 位置相关的斜坡 ID。我们对粒子使用体积插入法，N_PARTICLES=1。示例可在 fds/Verification/Miscellaneous/ 目录中的验证案例 part_path_ramp_jog.fds 中找到。示例输出如图 15.7 所示。实现路径斜坡所需的基本要素如下：
+
+```fortran
+&RAMP ID='PART RAMP X', T=0, F=0/ start position at X=0 m at Time=0 s
+&RAMP ID='PART RAMP X', T=10, F=5/ move linearly to X=5 m at Time=10 s
+! define a particle class as a mass source
+&PART ID='MASS SOURCE', SAMPLING_FACTOR=1, SURF_ID=..., PROP_ID=.../
+! initialize the particle position and assign path ramp
+&INIT ID='JOG', XB=..., PART_ID='MASS SOURCE',
+PATH_RAMP(1)='PART RAMP X', N_PARTICLES=1 /
+! monitor the position (or other quantities) using a device
+&DEVC QUANTITY='PARTICLE X', INIT_ID='JOG', ID='X', TIME_AVERAGED=F /
+```
+
+![image-20241222093620034](./../FUG6.9.1翻译.assets/image-20241222093620034.png)
+
+### Controlled Particle Orientation
+
+可以通过在 INIT 行上指定 ORIENTATION_RAMP 来控制使用 INIT 行放置的粒子的方位角。ORIENTATION_RAMP 为粒子方位的三个组成部分分别指定了一个 RAMP。必须定义所有三个分量。在每个时间步，RAMP 的输出将归一化为矢量大小为 1。在下面的示例中，粒子方向通过绕 Z 轴旋转，在 10 秒内从 -x 变为 +x。
+
+```fortran
+&PART ID='MY PART',SURF_ID='PART SURF',STATIC=T, ORIENTATION=1,1,1/
+&INIT ID='ONE PART',PART_ID='MY PART',XYZ=0.975,1,1,
+ORIENTATION_RAMP(1:3)='O1','O2','O3',N_PARTICLES=1/
+&RAMP ID='O1',T=0, F=-1/
+&RAMP ID='O1',T=10,F= 1/
+&RAMP ID='O2',T=0, F= 0/
+&RAMP ID='O2',T=5, F= 1/
+&RAMP ID='O2',T=10,F= 0/
+&RAMP ID='O3',T=0, F= 0/
+&RAMP ID='O3',T=10,F= 0/
+```
+
+请注意，“PART ”输入必须包含 “方向”（ORIENTATION），因为这将向 FDS 发出信号，为该类粒子的角度辐射通量分配阵列空间。测试用例中使用了该输入块，测试用例包括一个 1 立方米的盒子，盒子的 +x 壁辐射通量为 10 kW/m2，其余各壁辐射通量为 1 kW/m2。结果如图 15.8 所示。
+
+![image-20241222093828303](./../FUG6.9.1翻译.assets/image-20241222093828303.png)
+
+## Particle Removal
+
+可以通过多种方式从模拟中移除拉格朗日粒子：
+
+1. 在 “PART ”行中指定 AGE（年龄），以便在插入后的这段时间后清除微粒。
+2. 当液滴碰到计算域的 “floor ”时，无论其是否为固体，液滴都会消失。这一特性模拟了地面排水沟的存在。**要阻止 FDS 从计算域的 “floor ”上清除液滴，可在 “MISC ”行添加 POROUS_FLOOR=F。**但要注意的是，落在地板上的液滴会继续沿随机选择的方向水平移动，弹开障碍物，消耗 CPU 时间。还要注意的是，**固体颗粒不会像液滴那样从域的底部消失**。
+3. **如果液滴或微粒被吸入抽气孔，除非指定 PARTICLE_EXTRACTION_VELOCITY 的最小值（m/s），否则不会被移除。**也就是说，如果通风口的抽吸速度超过此值，颗粒或液滴将从模拟中移除。否则，液滴/颗粒的行为将与撞击其他固体表面无异。默认情况下，该参数是一个较大的正值，这意味着您必须指定一个小于正常通风口萃取速度的正值，该参数才会生效。如果希望提取所有颗粒/液滴，请将数值设置为很小的正数。
+
+## Suppression byWater
+
+水灭火模型由三个主要部分组成：水滴在空气中的传输、水在固体表面的跟踪以及预测燃烧速率的降低。本节将讨论后两个部分。
+
+### Droplet Movement on Solid Surfaces
+
+当液滴[^15-5]撞击固体表面[^15-6]时，它会被粘住，并被重新分配新的速度和方向。如果表面是水平的，则方向是随机选择的。如果是垂直面，则方向向下。通过 PART 行上的 HORIZONTAL_VELOCITY 和 VERTICAL_VELOCITY 参数可以控制液滴水平或垂直（向下）移动的速度。默认值分别为 0.2 m/s 和 0.5 m/s。
+
+当液滴撞击固体表面时，它会在等体积半球的横截面积上传递热量。当足够多的液体聚集在表面上形成一层膜时，热量传递的面积是基于膜而不是单个液滴。一旦形成膜层，液滴的直径并不重要，因为假定它会与形成膜层的其他液滴混合。但是，当液滴以 “滴落 ”的形式离开固体表面时，它会重新形成液滴，其新的直径可以通过PART行上的 SURFACE_DIAMETER 来指定，单位为微米。
+
+固体表面和液膜层之间的传热利用的是经验湍流传热相关性，该相关性是液体特性和用户指定的横向流速（HORIZONTAL_VELOCITY）或纵向流速（VERTICAL_VELOCITY）的函数。**详情请参见《FDS 技术参考指南》中的 “拉格朗日粒子 ”一章**。另外，您也可以在 PART 行中指定一个常数 HEAT_TRANSFER_COEFFICIENT_SOLID，单位为 W/m2/K。
+
+在某些应用中，例如在扑灭货架储藏商品火灾时，允许水滴沿着固体物体的底部水平移动是非常有用的。这种现象很难精确建模，因为它涉及表面张力、表面孔隙率和吸水性以及复杂的几何形状。不过，可以通过在 MISC 行中设置 ALLOW_UNDERSIDE_PARTICLES=T 来捕捉部分效果。该值通常为假。此外，请注意，当液滴撞击到障碍物时，垂直方向会被假定为与 Z 轴重合，无论重力矢量 GVEC 有何变化。
+
+名为 Sprinklers_and_Sprays/cascade.fds 的测试用例可用于演示水滴在固体障碍物上运动的各种特征。图 15.9 左侧的图像显示了 1 L 水滴从一个方框阵列的两侧层叠而下的情况。右图显示水的总质量保持不变。请注意，部分水蒸发到最初湿度为零的隔间中。
+
+![image-20241222094644641](./../FUG6.9.1翻译.assets/image-20241222094644641.png)
+
+### Reduction of the Burning Rate
+
+水通过冷却燃料表面和改变从固体中释放出燃料气体的化学反应来降低燃料热解速率。如果固体或液体燃料已通过 MATL 行给出了反应参数，则无需设置任何额外的抑制参数。假定水流冲击燃料表面会从热解过程中带走能量，从而降低燃料的燃烧速率。如果燃料表面被指定为 HRRPUA（单位面积热释放率），则需要指定一个参数来控制水的灭火效果，因为这种类型的模拟火灾本质上就像一个气体燃烧器，其流速是明确指定的。水灭火的经验方法是用指数函数来描述热解速率的降低。燃料的局部质量损失率用以下形式表示
+$$
+\dot m_f^{\prime\prime}(t)=\dot m_{f,0}^{\prime\prime}(t)e^{\int k(t)dt}
+$$
+这里$\dot m_{f,0}^{\prime\prime}(t)$是用户指定的无水时单位面积的燃烧率，k 是单位面积当地水质量$m_{\text w}^{\prime\prime}$的函数，单位为 kg/m2。
+$$
+k(t)={\text E\_\text {COEFFICIENT}} m_{\text w}^{\prime\prime}(t)\quad 1/s
+$$
+参数 E_COEFFICIENT 必须通过实验获得，单位为 m2/（kgs）。通常情况下，当燃料比较复杂，如纸箱包装的商品时，就会使用这种抑制算法。Sprinklers_and_Sprays/e_coefficient.fds 这个简单的示例案例演示了该参数的使用。下图所示的 SURF 线定义了一个 0.6 米乘 0.6 米的气体燃烧器，在燃烧器上方放置了一个水喷嘴。喷嘴在点火 10 秒后的 0.1 秒内喷出 0.1 升水。水的单位面积质量为 0.1/0.36 ≈ 0.278 kg/m2。图 15.10 显示了火的热释放率，在大约 20 秒内从 36 kW 下降到 0 kW。考虑了两种情况，一种是燃烧器和边缘由传统 OBST 构成，另一种是燃烧器由浸入式边界 GEOM 构成。
+
+```fortran
+&SURF ID='FUEL', HRRPUA=100., E_COEFFICIENT=1. /
+```
+
+预期的HRR曲线为：
+$$
+\dot{Q}(t)=36\mathrm{e}^{-0.278(t-10.4)}\quad\mathrm{kW}
+$$
+![image-20241222095500495](./../FUG6.9.1翻译.assets/image-20241222095500495.png)
+
+****
+
+[^15-1]: CVF表示小于给定直径的液滴在总质量中所占的比例。
+[^15-2]: CNF 表示总液滴中直径小于给定直径的部分。
+[^15-3]: 默认情况下，颗粒大小范围被分为六个分区，采样的颗粒被划分到这些分区中。这样可以确保在整个粒度范围内分配到合理数量的粒子。要更改默认的分仓数，请在 PART 行设置 N_STRATA。
+[^15-4]: 在这种情况下，无需指定 SHAPE='BLOCK'，只需省略 SHAPE。
+[^15-5]: 默认情况下，固体粒子不会像液滴一样粘附在固体表面。不过，您可以通过在 PART 行中设置 ADHERE_TO_SOLID=1，让固体粒子像液滴一样运动。
+[^15-6]: 如果不想让液滴积聚在固体表面，请在 PART 行设置 ADHERE_TO_SOLID=-1。对于液滴，该值通常为 1。
+
+# Wind and Atmospheric Stratification
+
+描述大气层的大部分参数都输入到一个名为 WIND 的命名行中。在 FDS 中指定风向有多种方法：
+
+1. 如果您只想指定风速和风向，并随时间和高度改变这些量，请参见第 16.1 节。
+2. 如果计算域的外围相对平坦，并且对表面粗糙度和大气条件有一定了解，请参阅第 16.2 节，了解如何应用莫宁-奥布霍夫(Monin-Obukhov)相似性理论。
+3. 如果您的计算域跨度达数公里，并希望根据压力梯度和科里奥利力应用风，或者希望应用地转风，请参见第 16.3 节。
+4. 如果您想按照风洞的方法对风进行建模，即创建一个 “风墙”，将计算域的整个侧面变成一个巨大的风扇，横向吹出空气，请参见第 16.4 节。
+
+第 16.5 节讨论了大气的温度分层。除非您选择应用基于莫宁-奥布霍夫理论的风和温度曲线，否则这一点非常重要。最后，第 16.6 节讨论了室外模拟的边界条件。
+
+## Wind Method 1: SpecifiedWind Speed and Direction
+
+在 FDS 中引入风的最简单方法是指定其速度（SPEED）和方向（DIRECTION）。例如，如果西南风的风速为 5 米/秒，请添加以下一行：
+
+```fortran
+&WIND SPEED=5., DIRECTION=225. /
+```
+
+这里假定除了地面摩擦力的影响外，风速和风向不随高度变化。风向DIRECTION遵循通常的气象学惯例--北风的方向为 0◦，从北向南吹，或在 FDS 坐标系中为负 y 方向。东风的风向为 90◦，从东吹到西，或负 x 方向。
+
+风速SPEED和风向DIRECTION可以使用 RAMP 函数作为时间和/或高度的函数。关于时间，请考虑以下几行输入：
+
+```fortran
+&WIND SPEED=1., RAMP_SPEED_T='spd', RAMP_DIRECTION_T='dir' /
+&RAMP ID='dir', T= 0, F=300 /
+&RAMP ID='dir', T= 600, F=330 /
+&RAMP ID='dir', T=1200, F=350 /
+.
+.
+&RAMP ID='spd', T= 0, F=2.8 /
+&RAMP ID='spd', T= 600, F=3.1 /
+&RAMP ID='spd', T=1200, F=3.5 /
+.
+.
+```
+
+这些线条分别根据 RAMP 函数 “spd ”和 “dir ”指示 FDS 随时间改变风速和风向。参数 T 代表时间（秒）。对于风向斜坡函数，F 代表与北方（Y 正方向）的夹角（度）。对于速度斜坡函数，F 代表基本 SPEED 的乘数，在本例中为 1 米/秒。
+您还可以使用斜坡函数 RAMP_SPEED_Z 和 RAMP_DIRECTION_Z 随高度改变风速分量。
+
+```fortran
+&WIND SPEED=1., RAMP_SPEED_Z='spd', RAMP_DIRECTION_Z='dir' /
+&RAMP ID='dir', Z= 0, F=300 /
+&RAMP ID='dir', Z= 200, F=330 /
+&RAMP ID='dir', Z= 500, F=350 /
+.
+.
+&RAMP ID='spd', Z= 0, F=1.0 /
+&RAMP ID='spd', Z= 200, F=1.5 /
+&RAMP ID='spd', Z= 500, F=1.8 /
+.
+.
+```
+
+参数 Z 代表高度（米）。与上述时间函数一样，在方向斜坡函数中，F 代表与北方（Y 正方向）的夹角，单位为度。该值与 RAMP_DIRECTION_T 设置的任何时间变化值相加。对于速度斜坡函数，F 表示基准 SPEED 的乘数。该值乘以 RAMP_SPEED_T 设置的任何时间变化值。
+
+通常，对于长达数小时的较长时间模拟，您可能无法确切知道风向的变化情况，但您可以根据大气的稳定性等级提供一个估计值。使用大气弥散界的术语[^48]，风向的扰动可以建模为：
+$$
+\theta^{\prime}(t+\delta t)=R^2\theta^{\prime}(t)+N\left(0,\sqrt{1-R^2}\sigma_\theta\right)\quad;\quad R=\mathrm{e}^{-\delta t/\tau}\quad;\quad\theta^{\prime}(0)=0
+$$
+其中，N(μ,σ) 表示均值为 μ、标准偏差为 σ 的正态随机变量；$\sigma_{\theta}$（SIGMA_THETA，以 WIND 线上的度数为单位）取决于大气的稳定性等级；$\tau$（TAU_THETA）是一个时间尺度，默认值为 300 秒。
+
+**Example**
+
+在名为 Atmospheric_Effects 的样本文件夹中，名为 wind_example_nn.fds 的输入文件展示了风的功能。每个案例都考虑了一块 1000 米 x 1000 米 x 100 米高的平坦地形。在名为 wind_example_5 和 wind_example_10 的示例中，5 米/秒的风速在 10 分钟内转向 90◦。图 16.1 显示了平均速度分量的延迟，这是由于只在外部边界施加了风廓线。
+
+![image-20241222101344363](./../FUG6.9.1翻译.assets/image-20241222101344363.png)
+
+## Wind Method 2: Monin-Obukhov Similarity
+
+莫宁-奥布霍夫(Monin-Obukhov)相似理论根据地表和大气条件提供垂直风速和温度曲线。这些剖面图应用于计算域的外部边界；因此，外围地形必须相对平坦。计算域内可能会有山丘或山谷，但外围应该是平坦的，以便风场远离边界自然形成。
+
+### Basic Equations
+
+假定风速曲线 u 和势温[^16-1] θ 随高度 z 变化，其变化规律为
+$$
+\begin{aligned}&u(z)&&=\quad\frac{u_*}{\kappa}\left[\ln\left(\frac{z}{z_0}\right)-\Psi_\mathrm{m}\left(\frac{z}{L}\right)\right]\\&\theta(z)&&=\quad\theta_0+\frac{\theta_*}{\kappa}\left[\ln\left(\frac{z}{z_0}\right)-\Psi_\mathrm{h}\left(\frac{z}{L}\right)\right]\end{aligned}
+$$
+式中 $u_{\star}$ 为摩擦速度，κ = 0.41 为冯卡尔曼Von Kármán常数，z0 为气动粗糙度长度，$\theta_{\star}$为缩放势温，$\theta_0$为地面势温，L 为奥布霍夫Obukhov长度，相似函数为 Dyer [^49]提出的函数：
+$$
+\begin{array}{rcl}\Psi_{\mathfrak{m}}\left(\frac{\zeta}{L}\right)&=&\begin{cases}&-5\frac{z}{L}&:&L\geq0\\\\&2\ln\left[\frac{1+\zeta}{2}\right]+\ln\left[\frac{1+\zeta^2}{2}\right]-2\tan^{-1}(\zeta)+\frac{\pi}{2}&:&L<0&&\end{cases}\end{array}
+$$
+
+$$
+\begin{array}{rcl}\Psi_{\mathrm{h}}\left(\frac{z}{L}\right)&=&\begin{cases}&-5\frac{z}{L}&:&L\geq0\\\\&2\ln\left[\frac{1+\zeta^{2}}{2}\right]&:&L<0&&&\end{cases}\zeta=\left(1-\frac{16z}{L}\right)^{1/4}\end{array}
+$$
+
+奥布霍夫Obukhov长度 L 表示大气的热稳定性。当 L 为负值时，大气分层不稳定；当 L 为正值时，大气分层稳定。当 L 接近于零时，分层的稳定或不稳定效应最强。因此，中性分层大气的奥布霍夫长度为无限大。一般来说，不稳定大气的温度会随高度的增加而降低，风向/风速的波动也相对较大。不稳定大气受浮力产生的湍流影响很大，导致混合增强。相反，高度稳定的大气条件会抑制湍流混合。
+
+如果没有报告或不知道这些参数，可以根据基本气象条件进行估算。仅根据在某一高度 $z_{ref}$ 处测得的平均风速 $u_{ref}$，就可以计算出摩擦速度：
+$$
+u_*=\frac{\kappa u_\mathrm{ref}}{\ln(z_\mathrm{ref}/z_0)-\Psi_\mathrm{m}(z_\mathrm{ref}/L)}
+$$
+奥布霍夫Obukhov长度 L 可从表 16.1 中选择。表 16.2 列出了气动粗糙度长度[^16-2] $z_0$ 的建议值。
+
+<center>Table 16.1: Suggested values of the Obukhov length, L (m).</center>
+
+![image-20241222102220858](./../FUG6.9.1翻译.assets/image-20241222102220858.png)
+
+<center>Table 16.2: Davenport-Wieringa roughness length classification [^50].</center>
+
+![image-20241222102306784](./../FUG6.9.1翻译.assets/image-20241222102306784.png)
+
+缩放势能温度$\theta_{\star}$ 可通过关系式求得：
+$$
+\theta_*=\frac{u_*^2\theta_0}{g\kappa L}\quad;\quad\theta_0=\theta_{\mathrm{ref}}/\left(1+\frac{u_*^2}{g\kappa^2L}\left[\ln(z_{\mathrm{ref}}/z_0)-\Psi_{\mathrm{h}}(z_{\mathrm{ref}}/z_0)\right]\right)
+$$
+或者，也可以根据显热通量的表达式估算出比例势能温度：
+$$
+\dot{q}_\mathrm{c}^{\prime\prime}=-\rho c_pu_*\theta_*
+$$
+请注意，热通量的正值表示地面比上面的空气温暖。图 16.2 显示了一些风廓线示例。请注意，L 的符号决定了大气是稳定还是不稳定；也就是说，相对于地面温度，温度是升高还是降低。
+
+### Applying Monin-Obukhov Profiles to FDS
+
+下面的输入线表示，在一个阳光明媚的日子里，西南风以 5 米/秒的速度吹向相对平坦的乡村地 带：
+
+```fortran
+&WIND SPEED=5., Z_REF=3, DIRECTION=225., L=-100., Z_0=0.03 /
+```
+
+如果 L 的值不为零，则表示要使用莫宁-奥布霍夫Monin-Obukhov曲线。SPEED 表示 Z_REF（米）高度处的风速。如果未指定 Z_REF，则假定风速取自离地 2 米的高度。除非指定 TMP_REF（◦C），否则假定 Z_REF 处的温度为指定的环境温度 TMPA。风向DIRECTION遵循通常的气象惯例--北风的风向为 0◦，从北向南吹，或 FDS 坐标系中的 y 负方向。东风的方向为 90◦，从东吹到西，或者说是负 x 方向。您只能在时间上改变风向，而不能在空间上改变风向：
+
+```fortran
+&WIND ..., RAMP_DIRECTION_T='dir' /
+&RAMP ID='dir', T= 0, F=300 /
+&RAMP ID='dir', T= 600, F=330 /
+&RAMP ID='dir', T=1200, F=350 /
+```
+
+这里，T 是时间（秒），F 是风向（度）。您不能在时间或空间上改变速度。
+如果您知道 $u_{\star}$ 或 $\theta_{\star}$ 的值，可以在 WIND 行输入 U_STAR (m/s) 和 THETA_STAR (K)。否则，它们将由 L 和 z0 计算得出。请勿同时输入所有四个参数。
+此外，不要在定义地面的 SURF 线上指定可能与指定 M-O 参数不一致的参数。考虑到大气剖面是在边界处施加的，通常一个固定的温度就足够了。
+
+**Example**
+
+在名为 Atmospheric_Effects 的样本文件夹中，名为 wind_example_nn.fds 的输入文件展示了风的功能。每个案例都考虑了一块 1000 米 x 1000 米 x 100 米高的平坦地形。在名为 wind_example_32 的示例中，域中散布着各种矩形块来表示建筑物，风力保持稳定。图 16.3 显示了指定的垂直方向风速和温度剖面与计算的时间平均剖面的比较。剖面图应该相似，但不完全相同。
+
+![image-20241222103021784](./../FUG6.9.1翻译.assets/image-20241222103021784.png)
+
+![image-20241222103035218](./../FUG6.9.1翻译.assets/image-20241222103035218.png)
+
+## Wind Method 3: Advanced Meteorological Concepts
+
+**如果您的计算域跨度达数公里，您可能会考虑使用一组更基本的参数来描述风场**。这是一个挑战，因为从几个气象站获得的近场、近地表风速或温度读数很难推断出远场气象条件。如果您想学习这门课程，您很可能需要通过一些试验和错误来确保您的远场条件能够产生与气象站获得的数据接近的结果。
+
+### Pressure Gradient Force
+
+风是由水平气压梯度驱动的，它将气团从表面气压高的区域推向气压低的区域。这种可选的压力梯度力 F 是动量方程中添加的额外力项：
+$$
+\frac{\partial\mathbf{u}}{\partial t}+\cdots=\mathbf{F}/\rho
+$$
+压力梯度力与边界层高度 H 上的平均风速 U 的关系为 [^50] 。
+$$
+\|\mathbf{F}\|\approx\rho C_\mathrm{D}\frac{U^2}{H}
+$$
+其中，$C_D$ 是无量纲阻力系数，对于相对光滑的表面，阻力系数为 $2×10^{-3}$，而对于粗糙或森林覆盖的表面，阻力系数为 $2×10^{-2}$。该关系式适用于中性稳定条件，即多风且表面加热程度相对较低。对于不稳定的条件，即风小和表面加热较强，该关系式变为
+$$
+\|\mathbf{F}\|\approx\rho b_{\mathrm{D}}\sqrt{gH\frac{\Delta\theta}{\theta}}\frac{U}{H}
+$$
+其中，$b_D = 1.83×10^{-3}$，Δθ/θ 是地面与边界层中间高度之间潜在温度的相对变化。请注意，这些关系都是近似值。如果要与特定的风力测量值相匹配，需要进行一些数值实验。
+
+例如，PRESSURE_GRADIENT_FORCE 是以 Pa/m 为单位输入 WIND 行的
+
+```fortran
+&WIND PRESSURE_GRADIENT_FORCE=0.01, DIRECTION=315, INITIAL_SPEED=5 /
+```
+
+风向DIRECTION遵循通常的气象学惯例--北风的方向为 0◦，从北向南吹，或在 FDS 坐标系中为负 y 方向。东风的方向为 90◦，从东吹到西，或者说是负 x 方向。您只能在时间上改变风向，而不能在空间上改变风向：
+
+```fortran
+&WIND ..., RAMP_DIRECTION_T='dir' /
+&RAMP ID='dir', T= 0, F=300 /
+&RAMP ID='dir', T= 600, F=330 /
+&RAMP ID='dir', T=1200, F=350 /
+```
+
+T 是时间（秒），F 是风向（度）。INITIAL_SPEED 设置了模拟开始时的水平风速分量。这是为了方便起见，因为仅通过压力梯度力缓慢增加风速可能需要数小时的模拟时间。INITIAL_SPEED 仅设置初始风速，不会产生长期影响。您可以使用 RAMP_PGF_T 来及时改变压力梯度力（PRESSURE_GRADIENT_FORCE）。
+
+在某些应用中，例如隧道，压力梯度力是引入外力导致的气流的一种便捷方法。在这种情况下，使用矢量 FORCE_VECTOR(1:3)以及相应的时间斜坡 RAMP_FVX_T、RAMP_FVY_T 和 RAMP_FVZ_T 来控制每个单独的分量有时更为方便。PRESSURE_GRADIENT_FORCE 只是 FORCE_VECTOR 的大小，单位相同。
+
+### Coriolis Force
+
+科里奥利力考虑了旋转参照系[^50]。科里奥利加速度对纳维-斯托克斯方程右侧的影响如下：
+$$
+\frac{\mathrm{Du}}{\mathrm{D}t}=...-2\mathbf{\Omega}\times\mathbf{u}
+$$
+其中 $\boldsymbol{\Omega}$是旋转矢量（见图 16.4）。要在 FDS 中应用科里奥利力，您有两种选择：一是通过 CORIOLIS_VECTOR(3)直接在 WIND 线上指定 $\boldsymbol{\Omega}$ 的分量；二是采取简单的方法，只需指定域的纬度LATITUDE（度），只要将 x 方向与东面对齐即可。在后一种情况下，FDS 将为您计算旋转矢量，计算公式为
+$$
+\boldsymbol{\Omega}=\omega\begin{bmatrix}0\\\cos(\phi\pi/180)\\\sin(\phi\pi/180)\end{bmatrix}
+$$
+其中，$\omega$ 是地球的自转速率，约为 1.16×10-5 2π/s。
+决定科里奥利力是否重要的非维数是罗斯比数。设 U 为相关的速度尺度，L 为问题的长度尺度。科里奥利频率为$f_c=2\omega\sin(\phi\pi/180)$。罗斯比Rossby数为
+$$
+\mathrm{Ro}=\frac{U}{f_cL}
+$$
+**当罗斯比数较大时，科里奥利力可以忽略不计。在建筑火灾中，通常就是这种情况**，因为 U 和 L 的数量级是统一的，$f_c=\mathscr{O}(10^4)$。
+
+### Geostrophic Wind
+
+当科里奥利力与稳定状态下的水平压力梯度达到平衡时，地转风就会从横向动量方程中得到[^50]。水平风分量可写成
+$$
+U_{g}=-\frac{1}{\rho f_{c}}\frac{\partial\bar{p}}{\partial y}V_{g}=+\frac{1}{\rho f_{c}}\frac{\partial\bar{p}}{\partial x}
+$$
+如果知道地转风速，可以通过 GEOSTROPHIC_WIND(1:2) = (Ug,Vg) 在 WIND 行输入。请注意，在 x 处输入风速意味着在 y 处输入平均压力梯度，反之亦然。当指定风向时，FDS 将根据公式 (16.15) 将该值转换为隐含的 FORCE_VECTOR。**要实现指定的高空地转风，必须同时打开科里奥利力**（见第 16.3.2 节）。由于地转风等同于应用 FORCE_VECTOR，因此也可以应用时间斜坡（见第 16.3.1 节）。
+
+![image-20241222104523830](./../FUG6.9.1翻译.assets/image-20241222104523830.png)
+
+### Surface Roughness
+
+在 “完全粗糙 ”极限下，FDS 使用的默认壁面模型由以下对数定律给出：
+$$
+\frac{u(z)}{u_*}=\frac{1}{\kappa}\ln\left(\frac{z}{s}\right)+8.5
+$$
+砂粒粗糙度 s 与第 16.2 节讨论的空气动力粗糙度长度 z0 有关。将莫宁-奥布霍夫相似理论给出的速度剖面（式 (16.2)）代入式 (16.17)，并注意到在地面附近$\psi_{\mathrm{m}}\approx0$，则粗糙度系数的有效换算为
+$$
+s=z_0\operatorname{e}^{8.5\kappa}\approx32.6z_0
+$$
+砂粒粗糙度 s 是通过参数 ROUGHNESS (m) 在 SURF 图线上指定的。与 M-O 相似性理论中的对应参数 z0 相比，该参数具有更直观的含义，因为它可以被视为地面障碍物的特征高度。表 16.2 列出了 z0 的建议值，公式 16.18 可用来计算输入到定义地面的 SURF 线的 ROUGHNESS 长度。
+
+### Thermal Boundary Conditions at the Ground
+
+相对于空气温度的地面温度是确定大气边界层稳定性的一个重要考虑因素。冷空气吹过温暖的地面会比暖空气吹过寒冷的地面导致更大的扩散。您可以在定义地面的 SURF 线上应用多种热边界条件：(1) 使用 WALL_TEMPERATURE (◦C)（墙面温度）设置固定或随时间变化的温度；(2) CONVECTIVE_HEAT_FLUX (kW/m2)；或 (3) 将地面定义为热厚固体的参数。设置 CONVECTIVE_HEAT_FLUX（对流热通量）便于与莫宁-奥布霍夫相似理论进行联系，在莫宁-奥布霍夫相似理论中，公式 (16.7) 和 (16.8) 可以结合使用，以提供地表对流热通量的表达式：
+$$
+\dot{q}_\mathrm{c}^{\prime\prime}=-\frac{u_*^3\theta_0\rho c_p}{g\kappa L}
+$$
+请注意，ρ（kg/m3）是密度，cp 是地面附近空气的比热。
+
+### Example
+
+图 16.5 显示了 FDS 在一个 1000 米方形域、具有周期性边界、高度为 200 米的域上生成的速度和温度剖面。风场是利用不同数值的压力梯度力 F 生成的，地面的 CONVECTIVE_HEAT_FLUX ($\dot q_c^{\prime\prime}$ ) 和表面 ROUGHNESS (s) 有几个不同的数值。公式 (16.18) 和 (16.19) 用于将指定的 $\dot q_c^{\prime\prime}$和 s 转换为 L 和 z0，然后用于生成莫宁-奥布霍夫速度和温度曲线，以比较模拟结果。请注意，这些模拟并不直接调用莫宁-奥布霍夫Monin-Obukhov曲线。相反，M-O 剖面是用来测试 FDS 模拟是否只使用指定的压力梯度力 F、表面粗糙度 s 和表面热通量 $\dot q_c^{\prime\prime}$就能产生逼真的垂直剖面。
+
+![image-20241222105229065](./../FUG6.9.1翻译.assets/image-20241222105229065.png)
+
+## Wind Method 4: The “Wall of Wind”
+
+使用莫宁-奥布霍夫Monin-Obukhov相似理论指定风的另一种方法是在计算域的外部边界指定幂律风廓线。这实质上创建了一个 “风墙”，在 FDS 早期版本中是指定风的推荐方法。不过，上述技术更可取，因为它们能以更自然的方式处理计算域的横向边界。
+
+要指定 “风墙”，可在分配给计算域外部横向边界的 SURF 线上设置 PROFILE='ATMOSPHERIC'。这将产生一个幂律大气风廓线，其形式为$u=u_0(z/z_0)^p$ ，其中 z 是离地面的高度。如果规定了大气剖面，也应规定 Z0 为 z0，PLE 为 p。VEL 指定了参考速度 u0。请注意，z0 并非地面，而是测量风速的地面以上高度，如高架气象站。假设地面高度为 0 米；要改变这一假设，请将 WIND 行中的 GROUND_LEVEL 设置为适当的高度。注意不要应用低于 GROUND_LEVEL 的大气速度剖面（如负 Z），否则 FDS 会出错停止。
+
+使用 “风墙 ”方法时要注意，风场的形成需要时间。为了加快速度，您可能希望将整个域内的气流初始化为所选的风速，但您可能不希望这个初始风场无限期地存在下去。在这种情况下，请添加一行：
+
+```fortran
+&WIND U0=..., V0=..., W0=... /
+```
+
+其中 U0、V0 和 W0 为所需的初始风场。直接设置速度分量将使模拟初始化为恒定流场，但流场将逐渐消失，SURF 线和大气剖面将控制风流。
+
+## Temperature Stratification
+
+注：如果您选择应用莫宁-奥布霍夫Monin-Obukhov风速和温度曲线，则本节内容不适用。
+通常情况下，在大气层的前几百米处，温度每千米下降几摄氏度。**在考虑烟雾上升时，这种微小的温度变化非常重要，因为烟雾上升时温度会迅速降低**。大气的 LAPSE_RATE 可以在 WIND（风向）行中指定，单位为 ◦C/m。**负号表示温度随高度降低。只有在室外计算域高度为几十米或几百米时才需要设置**。LAPSE_RATE 的默认值为 0 ◦C/m。
+另外，如果希望温度随高度发生非线性变化，也可以在 WIND 行指定 RAMP_TMP0_Z。例如
+
+```fortran
+&WIND ..., RAMP_TMP0_Z='T profile', ... /
+&RAMP ID='T profile', Z= 0.001 , F= 1.0258 /
+&RAMP ID='T profile', Z= 0.500 , F= 1.0019 /
+&RAMP ID='T profile', Z= 1.000 , F= 1.0000 /
+&RAMP ID='T profile', Z= 1.900 , F= 0.9986 /
+&RAMP ID='T profile', Z= 3.000 , F= 0.9977 /
+&RAMP ID='T profile', Z= 4.000 , F= 0.9972 /
+```
+
+Z 的值是离地面的高度（米）。F 的值是给定高度处的温度（开氏度）与环境温度（开氏度）之比（TMPA+273）。
+默认情况下，FDS 假设密度和压力随高度降低，与应用或域大小无关。对于大多数模拟来说，这种影响可以忽略不计，但可以通过在 WIND 行设置 STRATIFICATION=F 来完全关闭。
+
+### Stack Effect
+
+高层建筑通常会因内部和外部的温差而产生浮力引起的空气流动，即所谓的烟囱效应[^51]。这些温差会在垂直竖井（楼梯间、中庭、电梯井等）内产生气流，原因是不同楼层存在泄漏或开口。要在 FDS 中模拟这种现象，必须在计算域中包含整栋建筑或建筑内外的大部分区域。根据 WIND 行输入的指定温度曲线捕捉大气中压力和密度的下降非常重要。
+
+如果烟道流经的泄漏路径较小，则应将建筑物划分为一个或多个压力区ZONE。可根据暖通空调组件来定义泄漏路径。需要注意的是，泄漏模型将建筑物整个高度上的所有泄漏面结合在一起，因此会平均压力梯度。在进行叠加效应计算时，应定义单独的泄漏路径。下面将介绍一个简单的例子。
+
+**Example Case: Atmospheric_Effects/stack_effect**
+
+堆栈效应测试案例是对一栋 100 米高的建筑物进行的二维模拟，建筑物内部的气温比外部气温略高。大楼仅在顶层和底层有泄漏通道。由于楼内空气温度略高，楼内气压也略高，从而将空气排出楼外，反过来又将地面层的空气吸入楼内。室内空气温度 Tb 最初为 20 ◦C (293 K)，室外空气温度 T∞ 为 10 ◦C (283 K)。LAPSE_RATE 设置为 0 ◦C/m；因此，建筑物外的 T0(z) = T∞，建筑物内的 T0(z) = Tb。使用暖通空调求解器，在底层上方 2.5 米处和屋顶下方 2.5 米处定义了两个小型泄漏开口。每个开口的面积为 0.01 平方米，损耗系数为 2（例如，进入泄漏路径的入口损耗为 1，从泄漏路径的出口损耗为 1，这两个损耗都表示尖锐边缘开口）。
+
+建筑物内外的初始密度分层可通过关系式计算得出：
+$$
+\frac{\rho_0(z)}{\rho_\infty}=\exp\left(-\frac{g\overline{W}}{RT_0}z\right)
+$$
+其中 R 是通用气体常数，g 是重力加速度，W 是空气的平均分子量，z 是GROUND_LEVEL以上的高度，T0 是环境温度。将此公式应用于下通风口和上通风口的外部和内部位置，得出密度分别为 1.2412、1.1989、1.2272 和 1.1858 kg/m3。
+
+由于建筑物的开口在高度上等距分布，因此中性平面应接近其中点。计算方法如下
+$$
+\frac{\Delta H}{H_{\mathrm{n}}}=1+\frac{T_{\mathrm{b}}}{T_{\infty}}
+$$
+其中，Hn 是底部通风口上方的中性面高度，ΔH = 95 米是泄漏点之间的距离。由此得出中性面高度为下通风口上方 46.68 米或建筑物底部上方 49.18 米。请注意，这与建筑物底部上方 50 米的中点值相近。建筑物墙壁上的压力差由以下公式计算得出
+$$
+\Delta p=\frac{\overline{W}p_0(z)g\Delta z}{R}\left(\frac{1}{T_\infty}-\frac{1}{T_\mathbf{b}}\right)
+$$
+其中，Δz 是泄漏点到中性面的距离。利用中性面位置，下通风口的 Δz 值为 -46.68 m，上通风口的 Δz 值为 +48.32 m，这分别导致下通风口和上通风口的压力差为 -19.4 Pa 和 +20.4 Pa。在暖通空调动量方程中使用损耗 2 和压力差，得出底部的稳态流入速度为 3.95 m/s，顶部的流出速度为 4.15 m/s。速度和密度结果如图 16.6 所示。
+
+![image-20241222110145122](./../FUG6.9.1翻译.assets/image-20241222110145122.png)
+
+## External Boundary Conditions
+
+对于典型的室外模拟，计算域的横向外部边界和上边界要么是开放的，要么是周期性的，下边界代表地球。在进行室外模拟时，不要改变重力矢量，因为有很多假设是假定地面向下，天空向上。
+
+FDS 假定地面初始温度为环境温度 TMPA，大气温度根据稳定性条件随高度增加或减少。您可以使用 TMP_FRONT 将地面温度设置为不同的温度，或者提供材料属性，让地面自然升温或降温。您还可以设置 CONVECTIVE_HEAT_FLUX，正值表示地面温度高于上方空气温度。
+
+通常情况下，域顶被设置为 “OPEN”，这意味着即使风场或多或少与之平行，也可能会有热羽流从计算域中升起。
+
+计算域的横向边界可以设置为 SURF_ID=“OPEN”、“PERIODIC ”或 “PERIODIC FLOW ONLY”。SURF_ID='OPEN'是通常的流入/流出条件，适用于计算域向无限环境空隙开放的情况。SURF_ID=“PERIODIC ”假定计算域在每个方向上无休止地重复。这是一个重要的假设，因为使用莫宁-奥布霍夫Monin-Obukhov相似性理论建模的湍流大气边界层的发展距离远远超出了计算域。SURF_ID='PERIODIC FLOW ONLY'与'PERIODIC'相同，只是只有速度场是周期性的，而标量不是。也就是说，您不希望从计算域东部边界流出的烟羽立即在西部边界重新出现，尽管您可能仍然希望速度场是周期性的。
+
+****
+
+[^16-1]:势温度为$\theta=T\left(\frac{p_0}{p}\right)^{R/(W_\mathrm{air}c_p)}$，其中$p_0$通常为100kPa，$R/(W_{air}c_p)\approx 0.286$.
+[^16-2]:请注意，空气动力粗糙度$ z_0$ 与第 10.1.7 节中讨论的砂粒粗糙度 s 不同。更多信息，请参见第 16.3.4 节。
+
+# Wildland Fire Spread
+
+
+
+# Devices and Control Logic
+
+洒水器、烟雾探测器、热通量计和热电偶看似毫不相干，但从 FDS 的角度来看，它们只是根据所赋予的属性以特定方式运行的设备。它们可以用来记录模拟环境中的某些数量，如热电偶；也可以代表复杂传感器的数学模型，如烟雾探测器；在某些情况下，它们还可以触发事件发生，如计时器。
+所有广义上的设备都是通过命名列表组 DEVC 指定的。此外，高级功能和属性可通过名为 CTRL（控制）和 PROP（属性）的附加命名列表组来实现。
+
+## Device Location and Orientation
+
+无论具体属性如何，每个设备都需要设置在计算域内的某个点上，或者像光束烟雾探测器那样设置在计算域的某个跨度上。例如，自动喷水灭火装置在计算域内的定位线为
+
+```fortran
+&DEVC XYZ=3.0,5.6,2.3, PROP_ID='Acme Sprinkler 123', ID='Spk_39' /
+```
+
+设备的物理坐标由实数三元组 XYZ 给出。FDS 使用这些坐标来确定设备所在的气室或壁室。设备的评估使用设备所在单元的单元中心值或面中心值，不进行插值。设备的属性包含在以 PROP_ID 指定的 PROP 行中，下面将对 FDS 中包含的每种特殊设备进行说明。字符串 ID 只是一个描述符，用于在输出文件中识别设备，以及是否有任何操作与其激活相关。
+
+并非所有设备都需要通过 PROP_ID 与特定属性集关联。例如，点对点输出量可通过单个 DEVC 行指定，如
+
+```fortran
+&DEVC ID='TC-23', XYZ=3.0,5.6,2.3, QUANTITY='TEMPERATURE' /
+```
+
+它指示 FDS 记录给定点的温度与时间的函数关系。ID 是输出文件中的一个标签，其名称为 CHID_devc.csv。请注意，FDS 输出的是存储在该单元格中的数据，而不会对周围单元格进行任何插值。
+
+有些设备有特定的方向。任何放置在固体表面的设备都需要 IOR（方向索引）参数。数值 ±1 或 ±2 或 ±3 表示设备 “指向 ”的方向。例如，IOR=-1 表示设备安装在朝负 x 方向的墙上。ORIENTATION（方向）用于不在表面上但需要指明方向的设备，如洒水器。ORIENTATION 使用实数值三元组指定，实数值三元组表示方向矢量的分量。ORIENTATION 的默认值为 (0,0,-1)。例如，默认的向下喷洒喷头可以转向其他方向。如果指定
+
+```fortran
+&DEVC XYZ=3.0,5.6,2.3, PROP_ID='...', ID='...', ORIENTATION=0.707,0.707,0.0 /
+```
+
+喷洒器将指向正 x 和正 y 方向的中点。对于其他设备，ORIENTATION 只会改变 Smokeview 绘制设备的方式。
+
+水喷淋器喷洒到地面的密度取决于水喷淋臂的位置。与其根据水喷淋器与管道连接的每一个可能方向重新定义喷洒模式，还不如给 DEVC 提供参数 “旋转”（ROTATION）。默认 ROTATION 为 0 度，对于向下喷水器来说，就是正 X 轴。正 ROTATION 将使 0 度点向 Y 轴正方向旋转。
+
+## Device Output
+
+每个设备都有一个与之相关的数量。每个 DEVC 数量的时间历史会输出到一个逗号分隔的 ASCII 文件 CHID_devc.csv（输出文件格式参见第 27.3 节）。该文件可导入大多数电子表格软件包。大多数电子表格程序都会限制列数（例如 2003 版 Microsoft Excel 的列数限制为 256 列）。默认情况下，FDS 不限制逗号分隔值（.csv）文件中的列数。如果电子表格应用程序允许的列数少于输入文件中 DEVC 或 CTRL 的列数，则应在 DUMP 行设置 COLUMN_DUMP_LIMIT 等于 T。使用 DEVC_COLUMN_LIMIT 和 CTRL_COLUMN_LIMIT 指示设备和控制输出文件的列数限制。它们的默认值是 254。如果设备或控件的数量超过限制，则将写入多个输出文件。文件名后将附加一个数字。例如，如果需要两个设备文件，它们将分别命名为 CHID_1_devc.csv 和 CHID_2_devc.csv。
+
+DEVC 输出每 DT_DEVC 秒或 RAMP_DEVC 指示的离散时间写入文件，这两个时间都在 DUMP 行中指定。默认情况下，输出 QUANTITY 在两次打印之间按时间平均计算。要避免这种情况，请在 DEVC 行中添加 TIME_AVERAGED=F。
+
+DEVC 行的一个有用选项是添加 RELATIVE=T，表示只输出QUANTITY初始值的变化。这对验证和确认研究非常有用。您也可以通过在 DEVC 行将 ABSOLUTE_VALUE 设为 T 来输出设备数量的绝对值。
+
+**您可以通过乘以 CONVERSION_FACTOR 和/或添加 CONVERSION_ADDEND 来更改输出 QUANTITY 的值。**例如，要将温度输出从默认的 ◦C 改为 ◦F，CONVERSION_FACTOR 应设为 1.8，CONVERSION_ADDEND 应设为 32。然后，您可以通过设置 UNITS='F' 或其他任何设置来更改输出文件中的单位。如果不转换输出 QUANTITY 的默认值，则无需设置 UNITS。
+
+如果不想在输出文件中包含 DEVC QUANTITY，可在 DEVC 行设置 OUTPUT=F。有时，设备只是用作时钟或控制设备。在这种情况下，您可能希望防止其输出扰乱输出文件。如果 DEVC QUANTITY='TIME'，则 OUTPUT 会自动设置为 F。
+
+所有设备都必须有规定的QUANTITY。**某些特殊设备（第 18.3 节）的 QUANTITY 指定在 PROP 行上**。与 DEVC 线路相关的 PROP 线路上指定的 QUANTITY 将覆盖 DEVC 线路上指定的 QUANTITY。
+
+## Special Device Properties
+
+许多设备比较容易描述，如点测量，只需在 DEVC 行中包含几个参数即可。然而，对于更复杂的设备，要在每条 DEVC 线路上列出所有属性是很不方便的。例如，一个模拟可能包括数百个喷淋器，但每次设置喷淋器时都要列出喷淋器的属性是很乏味的。对于这些设备，可使用名为 PROP 的单独命名列表组来存储相关参数。每个 PROP 行都有一个唯一的 ID，并通过 PROP_ID 字符串由 DEVC 行调用。**描述 PROP 组的最佳方式是列出各种特殊设备及其属性。**
+
+### Sprinklers
+
+要指定一个或多个喷洒器，您需要指定属于各种命名列表组的几组不同参数。例如，下面是一个基本的喷洒器描述：
+
+```fortran
+&SPEC ID='WATER VAPOR' /
+&PART ID='my droplets', DIAMETER=1000., SPEC_ID='WATER VAPOR' /
+&PROP ID='K-11', QUANTITY='SPRINKLER LINK TEMPERATURE', RTI=148., C_FACTOR=0.7,
+ACTIVATION_TEMPERATURE=74., OFFSET=0.10, PART_ID='my droplets', FLOW_RATE=189.3,
+PARTICLE_VELOCITY=10., SPRAY_ANGLE=30.,80., SMOKEVIEW_ID='sprinkler_upright' /
+&DEVC ID='Spr-1', XYZ=22.8,19.7,7.4, PROP_ID='K-11' /
+&DEVC ID='Spr-2', XYZ=22.8,22.7,7.4, PROP_ID='K-11' /
+```
+
+一个名为 “Spr-1 ”的洒水器位于 XYZ 给定的空间点上。这是一个 “K-11 ”型喷淋器，其属性在 PROP 行中给出。请注意，各种名称（ID）对 FDS 来说没有任何意义，只是作为将一个事物与另一个事物联系起来的一种手段，因此应尽量使用有意义的 ID。参数 QUANTITY='SPRINKLER LINK TEMPERATURE'对 FDS 确实有特殊意义，它指示 FDS 使用标准 RTI（响应时间指数 [^52]）算法计算设备的启动。PROP 组中与水喷淋器相关的属性包括
+
+RTI 响应时间指数，单位 $(m·s)^{1/2}$（默认为 100）。
+
+C_FACTOR 传导系数，单位 $(m/s)^{1/2}$（默认为 0）。
+
+ACTIVATION_TEMPERATURE 单位℃（默认74℃）
+
+INITIAL_TEMPERATURE link的初始温度，单位℃（默认TMPA）
+
+FLOW_RATE 单位L/min。**该参数仅适用于液滴。**另一种方法是以 $L/(min\ bar^{1/2}) $为单位提供 K_FACTOR，以 bar 为单位提供 OPERATING_PRESSURE，即喷头的表压。流量由 $K\sqrt p$ 得出。请注意，**1 bar 相当于 14.5 psi**，$1\ gpm (gal/min) $相当于 3.785 L/min，$1\ gpm/psi^{1/2}$ 相当于 $14.41\ L/min/bar^{1/2}$ 。
+MASS_FLOW_RATE 单位kg/s。**对于液滴，该参数可以代替 FLOW_RATE，但对于固体颗粒则必须使用。**如果指定了 MASS_FLOW_RATE，则还必须指定 PARTICLE_VELOCITY。
+
+OFFSET **模拟中最初放置水滴的喷头周围球体的半径（米）（默认为 0.05 米）**。**假定在 OFFSET 以外，水滴已完全碎裂并独立传输。**请勿在网格边界 OFFSET 米范围内设置喷头或喷嘴。否则，进入相邻网格的液滴将被剔除。喷洒器的整个喷洒模式不必位于一个网格内，但喷洒器本身周围的体积必须位于一个网格内。
+
+PARTICLE_VELOCITY 液滴初速。(默认为 0 米/秒）
+
+ORIFICE_DIAMETER 喷嘴孔径，单位 m（默认为 0 m）。通过提供 FLOW_RATE 和 ORIFICE_DIAMETER 的值，该输入为设置液滴速度提供了另一种方法，在这种情况下，液滴速度是通过流速除以孔口面积计算得出的。如果没有关于液滴速度的任何信息，请使用这种方法。不过，为了再现特定的喷雾曲线，您通常必须对 PARTICLE_VELOCITY 进行微调。如果指定了 PARTICLE_VELOCITY 或 SPRAY_PATTERN_TABLE，则不会使用 ORIFICE_DIAMETER。
+
+SPRAY_ANGLE 喷射液滴时所经过的一对角度（单位：度）。相对于以洒水器为中心、半径为 OFFSET 的球体南极，这些角度勾勒出锥形喷洒模式。例如，SPRAY_ANGLE=30,80.将引导喷水通过 ORIENTATION 向量（默认为 0,0,-1）的 30◦ 和 80◦ 之间的区域（见图 18.1）。可以通过一对喷射角度来指定椭圆喷射模式。例如，SPRAY_ANGLE(1:2,1)=0.,60.和 SPRAY_ANGLE(1:2,2)=0.,30.定义了一个在 x 轴方向有 60 度角、在 y 轴方向有 30 度角的喷洒模式。从上往下看，喷型就像一个椭圆。SPRAY_PATTERN_SHAPE 决定了液滴在指定的 SPRAY_ANGLE 范围内的分布方式。可选项有 “UNIFORM（均匀）”和 “GAUSSIAN（高斯）”。默认分布为 “GAUSSIAN”。参数 SPRAY_PATTERN_MU 控制 “GAUSSIAN ”分布中液滴最大密度的纬度。分布宽度由参数 SPRAY_PATTERN_BETA 控制。
+
+SPRAY_PATTERN_TABLE 包含喷型描述的 TABL 行的名称。
+
+PART_ID 包含液滴属性的 PART 行名称。更多详情请参见第 15 章。
+
+PRESSURE_RAMP 指定管道压力与有效喷头和喷嘴数量关系的 RAMP 线路名称。
+
+SMOKEVIEW_ID 要包含在 Smokeview 动画中的喷头图纸名称。
+
+![image-20241222114050542](./../FUG6.9.1翻译.assets/image-20241222114050542.png)
+
+**Specifying Complex Spray Patterns**
+
+以更先进的喷洒器选项为例，喷洒器的喷洒模式为椭圆形，喷洒角内的质量流量分布均匀：
+
+```fortran
+&PROP ... SPRAY_ANGLE(1:2,1)=0.,60., SPRAY_ANGLE(1:2,2)=0.,30.,
+SPRAY_PATTERN_SHAPE='UNIFORM' /
+```
+
+对于全锥形喷头，参数 SPRAY_PATTERN_MU 默认设置为零。对于空心锥形喷雾，该参数设置为 SPRAY_ANGLE(1:2,1)的平均值，即 X 方向的喷雾角度。下面的示例使用 SPRAY_PATTERN_MU 来定义介于全锥形喷雾和空心锥形喷雾之间的喷雾：
+
+```fortran
+&PROP ... SPRAY_ANGLE=0.,30., SPRAY_PATTERN_MU=15. /
+```
+
+图 18.2 展示了参数 SPRAY_PATTERN_MU 和 SPRAY_PATTERN_BETA 对分布的影响。图中每一行的最大角度 SPRAY_ANGLE(2,1) 都在 22.5 到 45 度之间变化。每幅图中的扩散参数 SPRAY_PATTERN_BETA 从 0（均匀分布）到 1000（狭窄分布）不等。分布的峰值角度 SPRAY_PATTERN_MU 从 0 到 10 到 20，从顶行到底行依次变化。
+
+![image-20241222114318912](./../FUG6.9.1翻译.assets/image-20241222114318912.png)
+
+如果需要比 SPRAY_ANGLE 更复杂的喷型，则可以使用 TABL 命名列表组指定 SPRAY_PATTERN_TABLE。在 PROP 行使用 FLOW_RATE 指定总流量，使用 SPRAY_PATTERN_TABLE 指定喷型名称，然后使用一个或多个 TABL 表格行：
+
+```fortran
+&TABL ID='table_id', TABLE_DATA=LAT1,LAT2,LON1,LON2,VELO,FRAC /
+```
+
+其中，给定 “table_id ”的每一行 TABL 都提供了指定实心角下喷洒模式的球面分布信息。LAT1 和 LAT2 是实心角的边界，以从南极量起的度数为单位（0 表示南极，90 表示赤道，180 表示北极）。请注意，这并不是指定纬度的传统方法，而是一种基于典型洒水车向下洒水这一事实的方便系统，这也是 0 度被指定为 “南极 ”或 -z 方向的原因。参数 LON1 和 LON2 是实体角的边界（单位也是度），其中 0（或 360）与 -x 轴对齐，90 与 -y 轴对齐。VELO 是液滴在插入点的速度（米/秒）。FRAC 是应从该特定固体角度流出的液体占总流量的比例。
+
+在名为 bucket_test_2 的测试案例中，喷洒由两个喷射口组成，每个喷射口的速度为 5 米/秒，总流量为 60 升/分钟。第一个喷流占总流量的 0.2%，第二个喷流占总流量的 0.8%。喷射中心位于 “赤道 ”下方 60 ◦ 处，相距 180 ◦。
+
+```fortran
+&PROP ... FLOW_RATE=60., SPRAY_PATTERN_TABLE='TABLE1' /
+&TABL ID='TABLE1', TABLE_DATA=30,31, 0, 1,5,0.2 /
+&TABL ID='TABLE1', TABLE_DATA=30,31,179,180,5,0.8 /
+```
+
+请注意，每组 TABL 行必须有唯一的 ID。还要注意的是，TABL 行可以任意顺序指定。图 18.3 验证了喷头释放 5 公斤水（1 kg/s，5 秒）。
+
+![image-20241222114327986](./../FUG6.9.1翻译.assets/image-20241222114327986.png)
+
+**Varying Pipe Pressure**
+
+在实际的自动喷水灭火系统中，管道压力受驱动自动喷水灭火器数量的影响。通常情况下，当第一个水喷淋器启动时，压力会高于设计值，随着启动的水喷淋器越来越多，压力会逐渐降低。管道压力对流速、液滴速度和液滴大小分布都有影响。在 FDS 中，可使用 PRESSURE_RAMP 在 PROP 线上指定变化的管道压力。在每条 RAMP 线上，打开的喷头或喷嘴数量与一定的管道压力（bar）相关联。例如
+
+```fortran
+&PROP ID='My nozzle'
+OFFSET=0.1
+PART_ID='water drops'
+FLOW_RATE=0.9
+OPERATING_PRESSURE = 10.0
+PARTICLE_VELOCITY=15.0
+SPRAY_ANGLE=0.0,80.0
+PRESSURE_RAMP = 'PR1' /
+&RAMP ID = 'PR1' T = 1, F = 16. /
+&RAMP ID = 'PR1' T = 2, F = 10. /
+&RAMP ID = 'PR1' T = 3, F = 8. /
+```
+
+这些线条表示第一个喷淋器启动时的压力为 16 巴，两个喷淋器启动时的压力为 10 巴，三个或更多喷淋器启动时的压力为 8 巴。在计算主动喷水灭火器的数量时，FDS 会考虑具有给定 PART_ID 的所有主动喷水灭火器或喷嘴。
+
+使用压力斜坡时，FLOW_RATE 和 PARTICLE_VELOCITY 都取决于 OPERATING_PRESSURE。请指定 FLOW_RATE、K_FACTOR 和 OPERATING_PRESSURE。在后一种情况下，流速由$K\sqrt p$给出，液滴速度由液体密度和 ORIFICE_DIAMETER 给出。如果使用喷雾模式表，则通过 $K\sqrt p$和 ORIFICE_DIAMETER 分别确定表中每一行的液滴速度。粒度分布的中值直径按 $d_m(p) = d_m(p_o)(p_o/p)^{1/3}$ 的比例计算，其中 $p_o$ 为操作压力，$d_m(p_o) $由相应部件行的参数 DIAMETER 指定。
+
+在某些模拟中，可能会有几组独立的喷头或喷嘴。例如，一组喷嘴用于喷射燃料，另一组喷嘴用于喷水。在这种情况下，水流不会受到有多少个燃油喷嘴打开的影响。要使 PRESSURE_RAMP 只计算喷头或喷嘴的子集，可在 DEVC 行中使用关键字 PIPE_INDEX。例如
+
+```fortran
+&DEVC ID='Spr_1', XYZ=2.00,2.00,8.00, PROP_ID='My nozzle', PIPE_INDEX=1 /
+&DEVC ID='Spr_2', XYZ=1.00,1.00,8.00, PROP_ID='My nozzle', PIPE_INDEX=1 /
+&DEVC ID='Fuel_1', XYZ=2.00,2.00,1.00, PROP_ID='Fuel Spray', PIPE_INDEX=2 /
+&DEVC ID='Fuel_2', XYZ=1.00,1.00,1.00, PROP_ID='Fuel Spray', PIPE_INDEX=2 /
+```
+
+这些线条表明，燃油喷嘴与洒水器是一个独立的管网。有了这些输入，喷水器的 PRESSURE_RAMP 将不会计算任何活动的燃油喷嘴。有关使用 PIPE_INDEX 的更多详情，请参阅《验证指南》中的示例 flow_rate_2。
+
+### Nozzles
+
+喷嘴与洒水器非常相似，只是它们不是根据标准 RTI（响应时间指数）模型激活的。要模拟在给定时间启动的喷嘴，可直接在 DEVC 行指定 QUANTITY（数量）和 SETPOINT（设定点）。以下各行：
+
+```fortran
+&DEVC XYZ=23.91,21.28,0.50, PROP_ID='nozzle', ORIENTATION=0,0,1, QUANTITY='TIME',
+SETPOINT=0., ID='noz_1' /
+&DEVC XYZ=26.91,21.28,0.50, PROP_ID='nozzle', ORIENTATION=0,0,1, QUANTITY='TIME',
+SETPOINT=5., ID='noz_2' /
+&PROP ID='nozzle', PART_ID='heptane drops', FLOW_RATE=2.132,
+FLOW_TAU=-50., PARTICLE_VELOCITY=5., SPRAY_ANGLE=0.,45. /
+```
+
+设计两个相同类型的喷嘴，一个在零时启动，另一个在 5 秒时启动。请注意，喷嘴必须有指定的 PROP_ID，PROP 行必须有指定的 PART_ID，以描述液滴。
+
+**Example Case: Setting the Flow Rate of a Nozzle**
+
+该示例演示了压力斜坡和控制逻辑在喷嘴打开和关闭中的应用。它还可作为水流量的验证测试。有四个喷嘴在指定时间打开：0 秒、15 秒、30 秒和 45 秒。打开喷嘴的数量是通过 “OPEN NOZZLES ”装置测量的。图 18.4 显示了 FDS 结果与准确的预期值的比较。请注意，“OPEN NOZZLES ”只计算属于指定 PIPE_INDEX 的喷嘴。压力斜坡的设计目的是在所有开放喷嘴值下提供 10 升/分钟的总流量。在数学上，这意味着
+$$
+nK\sqrt p=10 L/min\quad \rightarrow \quad p=(\frac{10L/min}{nK})^2
+$$
+其中 n 是打开的喷嘴数量。相应的喷嘴和压力斜坡定义如下
+
+```fortran
+&PROP ID='Head', OFFSET=0.10, PART_ID='water drops', K_FACTOR=2.5,
+OPERATING_PRESSURE=1.,
+PRESSURE_RAMP='PR', PARTICLE_VELOCITY=2., SPRAY_ANGLE= 0.,60. /
+&RAMP ID='PR', T= 1., F=16. /
+&RAMP ID='PR', T= 2., F=4. /
+&RAMP ID='PR', T= 3., F=1.778 /
+&RAMP ID='PR', T= 4., F=1. /
+```
+
+使用测量单位面积累积质量的装置对水进行跟踪，并将其整合到总楼面面积中。水的总质量应在 60 秒内从零增加到 10 千克。图 18.4 显示了 FDS 预测结果与分析结果的比较。FDS 结果的轻微延迟是由于水滴落在地板上所需的时间造成的。
+
+![image-20241222144238069](./../FUG6.9.1翻译.assets/image-20241222144238069.png)
+
+### Specified Entrainment (Velocity Patch)
+
+喷淋头的几何形状和喷雾雾化细节在火灾计算中实际上是无法解决的。因此，很难预测喷水器的局部气相夹带。作为一种替代方法，可以指定喷头附近的局部气体速度。PROP 线可用于指定特定速度分量的多项式函数，并可通过一个装置将该函数 “补 ”入流场中。该装置的数量为 “VELOCITY PATCH（速度补丁）”，最初处于非激活状态。如第 18.4 节所述，必须使用单独的控制设备激活速度补丁。您可以使用 XB 为设备指定速度补间的局部区域。多项式定义为围绕 XYZ 点的二阶泰勒展开（XYZ 的默认值为 XB 的中心）。然后，FDS 使用沉浸边界法迫使局部速度分量满足多项式。多项式由系数 P0、PX(1:3) 和 PXX(1:3,1:3)指定，它们分别代表 XYZ 点的第 k 个速度分量值、一元导数和二元导数。请注意，一阶导数由一个三分量数组表示，二阶导数由一个对称的 3×3 数组表示，只需指定上三角部分。多项式的计算公式为（注意重复指数的求和是隐含的）：
+$$
+u_k(\mathbf{r})=\underbrace{(u_k)_0}_{\mathcal{P}0}+r_i\underbrace{\left(\frac{\partial u_k}{\partial x_i}\right)_0}_{\mathrm{PX(1:3)}}+\frac{r_ir_j}{2}\underbrace{\left(\frac{\partial^2u_k}{\partial x_i\partial x_j}\right)_0}_{\text{PXX(1:3,1:3)}}
+$$
+向量 r 是速度存储位置相对于 XYZ 点的位置。具体的速度分量由 PROP 中的整数 VELOCITY_COMPONENT 指定。下面我们提供一组 PROP 和 DEVC 行的示例，用于指定速度垂直分量的抛物线剖面。
+
+```fortran
+&PROP ID='p1', VELOCITY_COMPONENT=3, P0=-1,PXX(1,1)=5,PXX(2,2)=5 /
+&DEVC XB=-.1,.1,-.1,.1,.9,.95, QUANTITY='VELOCITY PATCH',PROP_ID='p1', DEVC_ID='t1'/
+&DEVC ID='t1', XYZ=0,0,.9, QUANTITY='TIME', SETPOINT=10/
+```
+
+在本例中，一个速度片段在模拟过程中的 10 秒钟处被激活。在 XB=-.1,.1,-.1,.1,.9,.95 框内具有交错存储位置的任何 w 速度分量都将被推向多项式曲线 “p1 ”指定的值。必须确保设备盒包含交错的存储位置（有关面心速度存储位置的讨论，请参阅理论手册 [^29]）。
+
+### Heat Detectors
+
+QUANTITY='LINK TEMPERATURE'定义了一个热探测器，它使用的启动算法与洒水器基本相同，但不喷水。
+
+```fortran
+&DEVC ID='HD_66', PROP_ID='Acme Heat', XYZ=2.3,4.6,3.4 /
+&PROP ID='Acme Heat', QUANTITY='LINK TEMPERATURE', RTI=132.,
+ACTIVATION_TEMPERATURE=74. /
+```
+
+与洒水器一样，RTI 是响应时间指数，单位为 $\sqrt {m\cdot s}$。ACTIVATION_TEMPERATURE 是链接激活温度，单位为摄氏度（默认为 74 ◦C）。INITIAL_TEMPERATURE 是链路的初始温度，单位为 ◦C（默认为 TMPA）。
+
+### Smoke Detectors
+
+在输入文件中定义一个烟雾探测器，其条目类似于
+
+```fortran
+&DEVC ID='SD_29', PROP_ID='Acme Smoke Detector', XYZ=2.3,4.6,3.4 /
+&PROP ID='Acme Smoke Detector', QUANTITY='CHAMBER OBSCURATION', LENGTH=1.8,
+ACTIVATION_OBSCURATION=3.24 /
+```
+
+为单参数 Heskestad 模型。请注意，**烟雾探测器必须有 PROP 行**，在这种情况下，可以在 PROP 行中指定 DEVC QUANTITY。对于四参数 Cleary 模型，请使用 PROP 行，如
+
+```fortran
+&PROP ID='Acme Smoke Detector I2', QUANTITY='CHAMBER OBSCURATION',
+ALPHA_E=1.8, BETA_E=-1.1, ALPHA_C=1.0, BETA_C=-0.8,
+ACTIVATION_OBSCURATION=3.24 /
+```
+
+其中两个特征填充时间或 “滞后 ”时间的形式为
+$$
+\delta t_e=\alpha_eu^{\beta_e}\quad;\quad\delta t_c=\alpha_cu^{\beta_c}
+$$
+默认探测器参数适用于特征长度LENGTH为 1.8 米的 Heskestad 模型。对于 Cleary 模型，必须明确列出所有 ALPHA 和 BETAs。表 18.1 列出了不明电离和光电探测器的建议常数。ACTIVATION_OBSCURATION 是阈值，单位为 %/m。阈值可根据制造商提供的常用设置进行设置。默认设置[^18-1]为 3.24 %/m（1 %/ft）。
+
+<center>Table 18.1: Suggested values for smoke detector model [^53]. See Ref. [^54] for others.</center>
+
+![image-20241222145611069](./../FUG6.9.1翻译.assets/image-20241222145611069.png)
+
+**Defining Smoke**
+
+默认情况下，FDS 假设火灾产生的烟雾与热释放率成正比。REAC 行上的 SOOT_YIELD=0.01 值表示烟雾产生率为燃料燃烧率的 0.01。这种情况下的 “烟雾 ”并没有被 FDS 明确跟踪，而是被假定为燃烧产物的一个函数。
+
+不过，假设您想定义自己的 “烟雾”，并想在不考虑 HRR 的情况下指定其产生率（甚至代替实际的火，如燃烧源）。您可能还想定义烟雾的质量消光系数和假定分子量（因为它将像气体物种一样被跟踪）。最后，您还需要使用 Smokeview 中的 SMOKE3D 功能将烟雾可视化（第 22.8 节）。请使用以下几行：
+
+```fortran
+&SPEC ID='MY SMOKE', MW=29., MASS_EXTINCTION_COEFFICIENT=8700. /
+&SURF ID='SMOLDER', TMP_FRONT=1000., MASS_FLUX(1)=0.0001, SPEC_ID='MY SMOKE',
+COLOR='RED' /
+&VENT XB=0.6,1.0,0.3,0.7,0.0,0.0, SURF_ID='SMOLDER' /
+&PROP ID='Acme Smoke', QUANTITY='CHAMBER OBSCURATION', SPEC_ID='MY SMOKE' /
+&DEVC XYZ=1.00,0.50,0.95, PROP_ID='Acme Smoke', ID='smoke_1' /
+&SM3D QUANTITY='DENSITY', SPEC_ID='MY SMOKE' /
+```
+
+使用与上述相同的烟雾探测器模型，但现在算法中使用的是物种 “MY SMOKE”，而不是与块状物种相关的物种。请注意，您的物种不会参与辐射计算。它只是作为烟雾的替代物。
+
+### Beam Detection Systems
+
+通过指定光束的端点（x1,y1,z1）和（x2,y2,z2）以及检测器启动时的总遮挡率，可以定义光束检测器。FDS 会确定哪些网格单元位于两个端点所定义的线性路径上。光束探测器响应的计算公式为
+$$
+\text{Obscuration}=\left(1-\exp\left(-K_\mathrm{m}\sum_{i=1}^N\rho_{\mathrm{s},i}\Delta x_i\right)\right)\times100\%
+$$
+其中，i 是光束路径上的网格单元，$\rho_{s,i}$是网格单元的烟尘密度，$\Delta x_i$是光束穿过网格单元的距离，$K_m$ 是质量消光系数。输入文件中的行格式为
+
+```fortran
+&DEVC XB=x1,x2,y1,y2,z1,z2, QUANTITY='PATH OBSCURATION', ID='beam1', SETPOINT=33.0 /
+```
+
+类似的QUANTITY是 “TRANSMISSION”，由以下表达式给出：
+$$
+\text{Transmission}=\exp\left(-K_\mathrm{m}\frac{L_0}{L}\sum_{i=1}^N\rho_{\mathrm{s},i}\Delta x_i\right)\times100\%/\mathrm{m}
+$$
+请注意，传输率的单位是 %/m，而不是像遮挡率那样的 %。L 是光束的总路径长度，$L_0$ 是 1 米的参考尺寸。
+
+**Example Case: A Beam Detector**
+
+一个 10 米乘 10 米乘 4 米的隔间中充满了 20 ◦C 的空气，其密度为 $\rho=1.195\ kg/m^3$。质量分数为 $Y_s = 3×10^{-5} $的均匀分布气体代表烟雾。烟雾 "密度为 $\rho_s ≡ \rho Y_s = 3.585×10^{-5} kg/m^3$。使用默认的质量消光系数 $K_m = 8700 m^2/kg$，计算出光学深度为 $K ≡ K_m\rho_s = 0.3119 m^{-1}$。舱内有三个光束探测器，路径长度均为 L = 10 m，但方向不同。预计路径遮蔽率为 $100(1-exp(-KL)) = 95.58\%$。请注意，本例使用 8 个网格来横跨计算域，并允许光束从一个网格穿过另一个网格。
+
+这个案例也为 Smokeview 渲染的烟雾弥漫的车厢提供了检验依据。九根立柱距离前墙的距离以 1 米为单位递增。根据公式 (22.23) 计算，可见距离为 $S ≡3/K =9.6 m$。参考图 18.5，在距离前墙 8.9 米处，应该可以勉强看到第九根圆柱。图 18.5 底部的曲线图比较了 Smokeview 用来给柱子着色的像素值和预期值。像素值为 0 到 255 之间的整数，其中 255 为白色，0 为黑色。
+
+![image-20241222150611460](./../FUG6.9.1翻译.assets/image-20241222150611460.png)
+
+### Aspiration Detection Systems
+
+吸气检测系统将一系列烟雾测量装置组合在一起。吸气系统由采样管网组成，采样管网将空气从一系列位置吸到一个中心点，在该中心点进行模糊度测量。要在 FDS 中定义这样一个系统，您必须提供采样位置、采样流速、每个采样位置的传输时间，如果需要警报输出，还必须提供整体模糊度 “设定点”。一个或多个 DEVC 输入用于指定采样位置的详细信息，另外一个输入用于指定中央探测器：
+
+```fortran
+&DEVC XYZ=..., QUANTITY='DENSITY', SPEC_ID='SOOT', ID='soot1', DEVC_ID='asp1',
+FLOWRATE=0.1, DELAY=20 /
+&DEVC XYZ=..., QUANTITY='DENSITY', SPEC_ID='SOOT', ID='soot2', DEVC_ID='asp1',
+FLOWRATE=0.2, DELAY=10 /
+...
+&DEVC XYZ=..., QUANTITY='DENSITY', SPEC_ID='SOOT', ID='sootN', DEVC_ID='asp1',
+FLOWRATE=0.3, DELAY=30 /
+&DEVC XYZ=..., QUANTITY='ASPIRATION', ID='asp1', BYPASS_FLOWRATE=0.4,
+SETPOINT=0.02 /
+```
+
+其中，DEVC_ID 是每个采样点用于参考中央检测器的值，FLOWRATE 是气体流速（千克/秒），DELAY 是采样点到中央检测器的传输时间（秒），BYPASS_FLOWRATE 是任何从计算域外吸入系统的空气的流速（千克/秒）（考虑到采样网络中位于 MESH 输入定义域之外的部分），SETPOINT 是警报阈值模糊度，单位为 %/m。吸气系统的输出计算公式为
+$$
+\text{Obscuration}=\left(1-\exp\left(-K_{\mathrm{m}}\frac{\sum_{i=1}^N\rho_{\mathrm{s},i}(t-t_{\mathrm{d},i})\dot{m}_i}{\sum_{i=1}^N\dot{m}_i}\right)\right)\times100\%/\mathrm{m}
+$$
+其中，$\dot m_i$ 是取样位置 i 处的质量流速，$\rho_{s,i}(t-t_{d,i})$是取样位置 i 处的烟尘密度，$t_{d,i}$ 是当前时间 t 之前的时间（DELAY），$K_m$ 是与可见光相关的 MASS_EXTINCTION_COEFFICIENT。
+请注意，FDS 实际上并不根据FLOWRATE从计算域中移除气体；FLOWRATE只是一个加权系数。
+
+**Example Case: aspiration_detector**
+
+一个边长 2 米的立方体隔间内有一个三处取样的抽吸系统。三个位置的流速相等，分别为 0.3 千克/秒、50 秒、100 秒和 150 秒。吸气检测器没有规定旁路流速。燃烧产物以 1 千克/秒的速度强制进入隔间底部。SOOT_YIELD=0.001。质量以 1 千克/秒的速度从隔间顶部排出。随着时间的推移，吸气探测器显示出越来越模糊的现象。由于第一个采样点的传输时间为 50 秒，再加上将燃烧产物传输到采样点的时间很短，因此最初的上升延迟时间略高于 50 秒。由于取样点的延迟时间，探测器的响应有三个高原。采样点位于同一地点，因此每个高原代表有额外三分之一的烟尘被传送到检测器。采样点的烟尘密度为 $7.1×10^{-5} kg/m^3$。如图 18.6 所示，使用该值计算出的高原为 18%、33.2% 和 45.7%。
+
+![image-20241222151219765](./../FUG6.9.1翻译.assets/image-20241222151219765.png)
+
+### Fire Depth
+
+在某些情况下，沿某一路径输出火的特征深度可能很有用。例如，**在模拟野外火灾等蔓延性火灾时，这一参数就非常重要**。定义火灾深度的方法有很多，但一个简单的选择是使用类似于光束探测器的逻辑，计算穿过热量释放体积大于阈值的区域的光束长度。这个 “FIRE DEPTH ”量可以写成：
+$$
+\mathrm{Fire~Depth}=\sum_{i=1}^{N}C_{i}\Delta x_{i};C_{i}=\left\{\begin{array}{cc}0&\dot{q}_{i}^{\prime\prime\prime\prime}\leq\dot{q}_{\mathrm{thresh}}^{\prime\prime\prime\prime}\\1&\dot{q}_{i}^{\prime\prime\prime}>\dot{q}_{\mathrm{thresh}}^{\prime\prime\prime\prime}\end{array}\right.
+$$
+与光束探测器一样，i 是光束路径上的一个网格单元，$\Delta x_i$ 是光束在网格单元内穿过的距离。阈值$\dot q^{\prime\prime\prime}_{thresh}$ 是通过在 DEVC 行上设置 SETPOINT 来实现的，单位为 kW/m3。如果没有提供该值，则默认为第 22.8 节所述的渲染 HRRPUV 的阈值。
+
+## Basic Control Logic
+
+设备可用于控制各种操作，如创建和移除障碍物，或激活和关闭风扇和通风口。每个设备都有一个相关的数量（QUANTITY），无论是直接包含在 DEVC 线路中，还是间接包含在可选的 PROP 线路中。使用 DEVC 参数 SETPOINT，可以在 QUANTITY 值超过或低于给定的 SETPOINT 时触发动作。以下参数决定了设备的控制方式：
+
+SETPOINT 设备状态发生变化时的数值。对于检测类型的设备（如热或烟雾），该值取自设备的 PROP 输入，无需在 DEVC 线上指定。
+
+TRIP_DIRECTION 正整数表示，当设备值大于设定点时，设备将从初始状态（INITIAL_STATE）开始变化，而当设备值小于设定点时，设备将等于初始状态（INITIAL_STATE）。负整数的行为则相反。当设备值小于 SETPOINT 时，设备将从 INITIAL_STATE 开始变化，而当设备值大于 SETPOINT 时，设备将等于 INITIAL_STATE。默认值为 +1。
+
+LATCH 如果该逻辑值设置为 T，设备将只改变状态一次。默认值为 T。
+
+INITIAL_STATE 该逻辑值是设备的初始状态。默认值为 F。例如，如果与设备相关的障碍物要消失，则设置 INITIAL_STATE=T。
+
+如果希望使用比单个设备及其设定点更复杂的逻辑来控制 FDS，则可使用 CTRL 输入指定控制功能。有关 CTRL 功能的更多信息，请参见第 18.5 节。最简单的设备示例就是计时器：
+
+```fortran
+&DEVC XYZ=1.2,3.4,5.6, ID='my clock', QUANTITY='TIME', SETPOINT=30. /
+```
+
+通过参数 DEVC_ID=“my clock ”与设备相关的任何内容都将在 30 秒后改变状态。例如，如果将文本添加到 OBST 行中，30 秒后该障碍物的 INITIAL_STATE 将从 F 变为 T。 换句话说，它将在 30 秒后创建，而不是在模拟开始时创建。这就是打开一扇门或一扇窗的简单方法。
+
+使用 DEVC 输出控制 FDS 时，使用 DEVC 的瞬时值。**对于某些QUANTITY类型（如TEMPERATURE），该输出可能会产生很大的噪声。**为防止虚假尖峰导致 DEVC 状态改变，可以指定参数 SMOOTHING_FACTOR。它对 DEVC 输出进行指数平滑处理，具体如下：
+$$
+\bar{x}^n=\bar{x}^{n-1}\text{ SMOOTHING\_FACTOR}+x^n\text{ (1-SMOOTHING\_FACTOR)}
+$$
+其中，n 为时间步长，x 为瞬时设备输出，$\bar x$ 为平滑输出。SMOOTHING_FACTOR 的默认值为 0，表示不执行平滑处理。请注意，SMOOTHING_FACTOR 只改变传递给控制函数的值，对写入 CHID_devc.csv 文件的 DEVC 值没有影响。
+
+设备的每次状态变化都会记录到日志文件中，参见第 27.5 节。
+
+### Creating and Removing Obstructions
+
+在许多火灾现场，打开或关闭一扇门或一扇窗都会导致火势的急剧变化。有时这些动作是有意为之，有时则是火灾的结果。在火灾数据系统的计算框架内，这些动作表现为设置或移除固体障碍物，或打开或关闭外部通风口。
+
+通过指定字符串 DEVC_ID（DEVC_ID 表示 OBST 行中要创建或移除的 DEVC ID 名称）来移除或创建实体障碍物。这将指示 FDS 在设备状态变为 F 或 T 时分别删除或创建障碍物。例如
+
+```fortran
+&OBST XB=..., DEVC_ID='det2' /
+&DEVC XYZ=..., ID='det2', INITIAL_STATE=T /
+```
+
+会在指定的 DEVC 改变状态时移除给定的障碍物。
+
+使用以TIME为测量量的 DEVC，可以在预定时间创建或移除障碍物。例如，以下指令将使指定的孔洞（HOLE）和障碍物（OBSTructions）在不同的指定时间出现/消失。这几行是名为 create_remove.fds 的简单测试用例的一部分。
+
+```fortran
+&OBST XB=0.3,0.4,0.1,0.9,0.1,0.9, COLOR='PURPLE' /
+&HOLE XB=0.2,0.4,0.2,0.3,0.2,0.3, COLOR='RED', DEVC_ID='timer1' /
+&HOLE XB=0.2,0.4,0.7,0.8,0.7,0.8, COLOR='GREEN', DEVC_ID='timer2' /
+&OBST XB=0.7,0.8,0.2,0.3,0.2,0.3, COLOR='BLUE', DEVC_ID='timer3' /
+&OBST XB=0.7,0.8,0.6,0.7,0.6,0.7, COLOR='PINK', DEVC_ID='timer4' /
+&OBST XB=0.5,1.0,0.0,1.0,0.0,0.1, COLOR='YELLOW', DEVC_ID='timer5' /
+&HOLE XB=0.7,0.8,0.7,0.8,0.0,0.1, COLOR='BLACK', DEVC_ID='timer6' /
+&HOLE XB=0.7,0.8,0.2,0.3,0.0,0.1, COLOR='GRAY 50', DEVC_ID='timer7' /
+&DEVC XYZ=..., ID='timer1', SETPOINT=1., QUANTITY='TIME', INITIAL_STATE=F /
+&DEVC XYZ=..., ID='timer2', SETPOINT=2., QUANTITY='TIME', INITIAL_STATE=T /
+&DEVC XYZ=..., ID='timer3', SETPOINT=3., QUANTITY='TIME', INITIAL_STATE=F /
+&DEVC XYZ=..., ID='timer4', SETPOINT=4., QUANTITY='TIME', INITIAL_STATE=T /
+&DEVC XYZ=..., ID='timer5', SETPOINT=5., QUANTITY='TIME', INITIAL_STATE=F /
+&DEVC XYZ=..., ID='timer6', SETPOINT=6., QUANTITY='TIME', INITIAL_STATE=T /
+&DEVC XYZ=..., ID='timer7', SETPOINT=6., QUANTITY='TIME', INITIAL_STATE=F /
+```
+
+模拟开始时，紫色障碍物中嵌入一个红色块。这个红色块实际上是一个洞，其初始状态为 F，即洞已被填满。同样在模拟开始时，可以看到一个粉红色的障碍物。1 秒后，红块消失。2 秒后，紫色障碍物上的空洞被绿色块填满。这个孔最初是真实的，即是空的。蓝色障碍物在 3 秒时出现，因为它的初始状态是假的，也就是说它最初并不存在。粉色障碍物在 4 秒时消失，因为它的初始状态为真，并且在 4 秒时状态发生了变化。5 秒时，黄色障碍物出现，其中有一个空洞和一个嵌入的灰色块。6 秒时，灰色块消失，因为它是一个最初为假的洞，因此在其父障碍物（黄色）创建时被灰色块填满。同样，在 6 秒钟时，黄色障碍物中原本存在的孔被黑色块填满，因为它是一个最初为空的孔，在其 DEVC 状态改变后被填满。在对障碍物和孔洞进行复杂的创建/删除方案之前，您应该先尝试一个简单的示例。
+
+要多次创建和移除障碍物，可以将 LATCH=F 设置为循环数学函数（见第 18.5.1 节），如下图所示，或者使用 “CUSTOM ”控制功能（见第 18.5.5 节）。下面使用TIME作为 SIN 数学函数的输入。DEVC 值的符号会切换 OBST 的状态。
+
+```fortran
+&DEVC ID='t1', XYZ=..., QUANTITY='TIME', TIME_AVERAGED=F/
+&CTRL ID='s1', FUNCTION_TYPE='SIN', INPUT_ID='t1'/
+&DEVC ID='timer', XYZ=..., QUANTITY='CONTROL VALUE', CTRL_ID='s1', SETPOINT=0,
+LATCH=F/
+&OBST XB=..., DEVC_ID='timer'/
+```
+
+### Activating and Deactivating Vents
+
+当设备或控制功能应用于VENT时，其目的是通过 DEVC_ID 激活或停用与VENT相关联的任何时间斜坡。例如，要控制风扇，请执行以下操作：
+
+```fortran
+&SURF ID='FAN', VOLUME_FLOW=5. /
+&VENT XB=..., SURF_ID='FAN', DEVC_ID='det2' /
+&DEVC ID='det2', XYZ=..., QUANTITY='TIME', SETPOINT=30., INITIAL_STATE=F /
+```
+
+请注意，在 30 秒时，“FAN ”的 “状态 ”从 F 变为 T，或者更简单地说，“FAN ”开启。由于没有与 “FAN ”相关的明确时间函数，默认的 1 秒斜坡上升将从 30 秒开始，而不是从 0 秒开始。如果 INITIAL_STATE（初始状态）=T，则风扇应在 30 秒时关闭。从本质上讲，“激活 ”VENT会导致所有相关的时间函数延迟，直到达到SETPOINT。VENT的 “停用 ”会关闭所有时间功能。这通常意味着 SURF 线路上的参数全部失效，因此最好通过一个简单的示例来检查其功能。
+
+’MIRROR“或 ”OPEN "的VENT不应被激活或关闭。不过，您可以在OPEN’ VENT前放置障碍物，然后创建或移除障碍物，以模拟门窗的关闭或打开。
+
+在某些情况下，您可能需要创建或移除附有通风口的障碍物。如果这些障碍物重叠在一起，就可能会混淆哪个VENT与哪个 OBST 相连。如果遇到这种情况，请给 OBST 一个 ID，并将此 OBST_ID 分配到通风口线路上。
+
+## Advanced Control Functions: The CTRL Namelist Group
+
+很多系统的功能都无法用一个简单的 “设定点 ”设备来描述。例如，一个典型的HVAC系统。该系统由一个恒温器控制，恒温器上有一个温度设定点。当温度低于设定值一定程度时，系统开启；当温度高于设定值一定程度时，系统关闭。这种行为不能仅通过指定一个设定点来定义。您还必须定义设定点周围的范围或 “死区”，以及温度升高或降低是否会激活系统。在HVAC示例中，越过死区的下边缘会激活加热；越过上边缘则会停用加热。这些更为复杂的行为可通过 CTRL 在 FDS 中建模。以下参数决定了控制功能的行为方式：
+
+ID 控制功能的名称，在所有控制功能中唯一。
+
+FUNCTION_TYPE 控制功能类型。可能的类型如表 18.2 所示。
+
+INPUT_ID 作为控制功能输入的 DEVC 或 CTRL ID 列表。最多可指定 40 个输入。如果 DEVC 或 CTRL 被用作控制功能的 INPUT_ID，那么它必须在设备和控制功能中都具有唯一的 ID。此外，控制功能本身不能用作输入。
+
+SETPOINT 控制函数状态发生变化时的值。这只适用于返回数值的函数。
+
+TRIP_DIRECTION 正整数表示当控制功能的值上升超过设定点时，控制功能将改变状态；负整数表示当控制功能的值下降超过设定点时，控制功能将改变状态。默认值为 +1。
+
+LATCH 如果该逻辑值设为 T，则控制功能只改变一次状态。默认为 LATCH=T。
+
+INITIAL_STATE 控制功能的初始状态。默认为 F。例如，如果与控制功能相关的障碍物要消失，则在 DEVC 行设置 INITIAL_STATE=T。
+
+对于可以指定 DEVC_ID 的任何对象（如 OBST 或 VENT），可以指定 CTRL_ID 代替。
+
+如果要设计一个涉及多次状态变化的控制和设备系统，请在相关的 DEVC 或 CTRL 行中加入属性 LATCH=F。默认情况下，设备和控制器只能改变一次状态，如自动喷水灭火器启动或烟雾探测器报警。默认情况下，设备和控制器都使用 LATCH=T。
+
+如果希望 DEVC 根据 CTRL 的逻辑状态运行，请设置 QUANTITY='CONTROL'，并将 CTRL_ID 设为控制功能的 ID。
+
+数值控制功能的输出值由 QUANTITY='CONTROL VALUE' 的 DEVC 行定义，CTRL_ID 设置为控制功能的 ID。然后，可以使用 SETPOINT 使 DEVC 操作控制功能的特定输出值。该输出值不能用于纯逻辑控制功能，其唯一输出是 ANY 或 DEADBAND 等逻辑状态。对于 CUSTOM，输出值将是 RAMP 函数的值，而对于 TIME_DELAY，输出值将是已评估的延迟。
+
+控制功能的每次状态变化都会记录到日志文件中，参见第 27.5 节。
+
+<center>Table 18.2: Control function types.</center>
+
+![image-20241222153644726](./../FUG6.9.1翻译.assets/image-20241222153644726.png)
+
+### Control Functions: ANY, ALL, ONLY, and AT_LEAST
+
+假设您希望在一个房间的四个烟雾探测器中的任何一个启动后，移除一个障碍物（例如打开一扇门）。请使用以下形式的输入行
+
+```fortran
+&OBST XB=..., SURF_ID='...', CTRL_ID='SD' /
+&DEVC XYZ=1,1,3, PROP_ID='Acme Smoker', ID='SD_1' /
+&DEVC XYZ=1,4,3, PROP_ID='Acme Smoker', ID='SD_2' /
+&DEVC XYZ=4,1,3, PROP_ID='Acme Smoker', ID='SD_3' /
+&DEVC XYZ=4,4,3, PROP_ID='Acme Smoker', ID='SD_4' /
+&CTRL ID='SD', FUNCTION_TYPE='ANY', INPUT_ID='SD_1','SD_2','SD_3','SD_4',
+INITIAL_STATE=T /
+```
+
+控制功能 SD 的 INITIAL_STATE 为 T，表示最初存在障碍物。状态改变 "表示当任何烟雾探测器报警时，障碍物将被移除。默认情况下，控制功能 SD 的 INITIAL_STATE 为 F，即最初不存在障碍物。
+
+假设您现在希望在房间内的四个烟雾探测器都启动后才创建障碍物（例如，门被关闭）。请使用以下形式的控制线
+
+```fortran
+&CTRL ID='SD', FUNCTION_TYPE='ALL', INPUT_ID='SD_1','SD_2','SD_3','SD_4' /
+```
+
+控制函数 AT_LEAST 和 ONLY 是 ANY 和 ALL 的概括。例如
+
+```fortran
+&CTRL ID='SD', FUNCTION_TYPE='AT_LEAST', N=3, INPUT_ID='SD_1','SD_2','SD_3','SD_4' /
+```
+
+**当至少有 3 个探测器启动时**，状态就会从 F 变为 T。请注意，在本示例和下面的示例中，参数 N 用于指定满足控制功能条件所需的激活设备数量。控制功能
+
+```fortran
+&CTRL ID='SD', FUNCTION_TYPE='ONLY', N=3, INPUT_ID='SD_1','SD_2','SD_3','SD_4' /
+```
+
+**当 3 个且仅有 3 个探测器启动时**，状态会从 F 变为 T。
+
+### Control Function: TIME_DELAY
+
+当 TIME_DELAY 控制函数的输入状态发生变化时，它将启动一个长度为 DELAY 的定时器。定时器到期时，TIME_DELAY 控制函数将改变状态。请注意，每次输入状态发生变化时，定时器都会启动；因此，如果在第一个定时器结束前输入状态发生第二次变化，定时器将被重置。通过该功能，FDS 可以模拟设备激活与其他动作发生之间的时间延迟，如干式管道喷淋灭火系统。
+
+```fortran
+&DEVC XYZ=2,2,3, PROP_ID='Acme Sprinkler_link', QUANTITY='LINK TEMPERATURE',
+ID='Spk_29_link' /
+&DEVC XYZ=2,2,3, PROP_ID='Acme Sprinkler', QUANTITY='CONTROL', ID='Spk_29',
+CTRL_ID='dry pipe' /
+&CTRL ID='dry pipe', FUNCTION_TYPE='TIME_DELAY', INPUT_ID='Spk_29_link', DELAY=30. /
+```
+
+自动喷水灭火系统与管道之间的这种关系意味着自动喷水灭火系统的喷水是由 “dry pipe ”控制的（在本例中是延迟的），在水从喷头流出之前，Spk_29 的激活时间（由 Spk_29_link 测得）增加了 30 秒。
+
+### Control Function: DEADBAND
+
+该控制功能的作用类似于HVAC恒温器。它可以在类似于加热或制冷的两种模式下运行。该函数有一个 INPUT_ID（即函数使用的 DEVC 值）、一个上限和下限 SETPOINT 以及 ON_BOUND 指定的运行模式。如果 ON_BOUND=“LOWER”，当 INPUT_ID 的值低于 SETPOINT 的下限值时，函数将从初始状态（INITIAL_STATE）开始改变状态；当 INPUT_ID 的值超过 SETPOINT 的上限值时，函数将恢复初始状态，即类似于加热系统。如果 ON_BOUND='UPPER'，则会出现相反的情况，即冷却系统。
+
+对于HVAC系统，以下输入行将设置一个简单的恒温器：
+
+```fortran
+&SURF ID='FAN', TMP_FRONT=40., VOLUME_FLOW=-1. /
+&VENT XB=-0.3,0.3,-0.3,0.3,0.0,0.0, SURF_ID='FAN', CTRL_ID='thermostat' /
+&DEVC ID='TC', XYZ=2.4,5.7,3.6, QUANTITY='TEMPERATURE' /
+&CTRL ID='thermostat', FUNCTION_TYPE='DEADBAND', INPUT_ID='TC',
+ON_BOUND='LOWER', SETPOINT=23.,27., LATCH=F/
+```
+
+在这里，我们要控制的是模拟FAN的VENT，它将热空气吹入房间。一个名为 TC 的 DEVC 位于房间内，用于测量温度。当温度低于 23 ℃（ON_BOUND='LOWER'）时，恒温器使用 SETPOINT 打开风扇；当温度高于 27 ℃ 时，恒温器关闭风扇。
+
+注意，死区控制器需要将 LATCH 设置为 F
+
+### Control Function: RESTART and KILL
+
+有时，您可能只想运行一次模拟，直到达到某个目标，或者您可能想创建某个基线条件，然后运行该基线的多种排列组合。例如，您可能想运行一系列模拟，一旦探测器报警，就测试不同的缓解策略。使用重启（RESTART）控制功能，您可以在满足所需的条件后创建一个重启文件。仿真可以继续进行，重启文件可以复制，以便拥有各种排列组合的作业识别字符串 CHID（当然，前提是遵守使用重启文件的常规限制）。一旦满足所需的条件，使用 KILL 控制功能即可停止 FDS。如果既要写入重启文件，又要停止 FDS，则需要在使用这两个函数时使用相同的 INPUT_ID。例如
+
+```fortran
+&DEVC ID='temp', QUANTITY='TEMPERATURE', SETPOINT=1000., XYZ=4.5,6.7,3.6 /
+&DEVC ID='velo', QUANTITY='VELOCITY', SETPOINT=10., XYZ=4.5,6.7,3.6 /
+&CTRL ID='kill', FUNCTION_TYPE='KILL', INPUT_ID='temp' /
+&CTRL ID='restart', FUNCTION_TYPE='RESTART', INPUT_ID='velo' /
+```
+
+当给定点的温度上升超过 1000 ◦C 时，将终止工作；或者当给定点的速度超过 10 米/秒时，只强制输出重启文件。下列行
+
+```fortran
+&DEVC ID='temp', QUANTITY='TEMPERATURE', SETPOINT=1000., XYZ=4.5,6.7,3.6 /
+&CTRL ID='kill', FUNCTION_TYPE='KILL', INPUT_ID='temp' /
+&CTRL ID='restart', FUNCTION_TYPE='RESTART', INPUT_ID='temp' /
+```
+
+会在给定点的温度上升到 1000 ℃ 以上时杀死任务，并写入重启文件。
+
+### Control Function: CUSTOM
+
+对于大多数控制功能类型，设备和控制功能的逻辑（真/假）输出以及它们上次改变状态的时 间都被用作输入。CUSTOM 功能使用 DEVC 的数值输出和 RAMP 来确定功能的输出。当 DEVC 值的 RAMP 输出为负值时，CTRL 将具有其初始状态的值。当 DEVC 值的 RAMP 输出为正值时，CTRL 将具有与其初始状态相反的值。在下面的例子中，CUSTOM 控制功能使用定时器设备的数字输出作为输入。当 RAMP_ID 指定的斜坡参数 F 值为正值时，函数返回 true（INITIAL_STATE 的默认值为 F）；当 RAMP F 值为负值时，函数返回 false。在这种情况下，控制将从假状态开始，并在计时器计时到 60 秒时切换为真状态。然后它将保持为真状态，直到计时器计时到 120 秒，然后再变回假值。
+
+请注意，在使用控制功能时，分配给 CTRL 和 DEVC 输入的 ID 在两组输入中必须是唯一的，也就是说，不能对控制功能和设备使用相同的 ID。通过使用基于时间的CUSTOM控制功能，您可以使风扇以固定的周期运行：
+
+```fortran
+&SURF ID='FAN', TMP_FRONT=40., VOLUME_FLOW=-1. /
+&VENT XB=-0.3,0.3,-0.3,0.3,0.0,0.0, SURF_ID='FAN', CTRL_ID='cycling timer' /
+&DEVC ID='TIMER', XYZ=2.4,5.7,3.6, QUANTITY='TIME' /
+&CTRL ID='cycling timer', FUNCTION_TYPE='CUSTOM', INPUT_ID='TIMER', RAMP_ID='cycle' /
+&RAMP ID='cycle', T= 59, F=-1 /
+&RAMP ID='cycle', T= 61, F= 1 /
+&RAMP ID='cycle', T=119, F= 1 /
+&RAMP ID='cycle', T=121, F=-1 /
+```
+
+在上述示例中，风扇最初处于关闭状态，60 秒后打开，120 秒后关闭。
+您可以使用以下几行让障碍物多次出现和消失:
+
+```fortran
+&OBST XB=..., SURF_ID='whatever', CTRL_ID='cycling timer' /
+&DEVC ID='TIMER', XYZ=..., QUANTITY='TIME' /
+&CTRL ID='cycling timer', FUNCTION_TYPE='CUSTOM', INPUT_ID='TIMER', RAMP_ID='cycle' /
+&RAMP ID='cycle', T= 0, F=-1 /
+&RAMP ID='cycle', T= 59, F=-1 /
+&RAMP ID='cycle', T= 61, F= 1 /
+&RAMP ID='cycle', T=119, F= 1 /
+&RAMP ID='cycle', T=121, F=-1 /
+```
+
+在上述情况下，最初会移除障碍物，然后在 60 秒时添加障碍物，并在 120 秒时再次移除障碍物。
+在尝试一个案例之前，先用一个简单的案例对这些组合进行试验，以确保 FDS 确实达到预期效果。
+
+### Control Function: Math Operations
+
+执行简单数学运算（SUM、SUBTRACT、MULTIPLY、DIVIDE、POWER 等）的控制函数可以指定一个常量值作为其输入之一。具体方法是将其中一个 INPUT_ID 指定为 “CONSTANT”，并使用输入 CONSTANT 提供数值。例如，下面的输入代表一个控制函数，当速度的平方超过 10 时，该函数的状态将发生变化（有关 TRIP_DIRECTION 的解释，请参见第 18.4 节）。
+
+```fortran
+&DEVC ID='SPEED SENSOR', XYZ=..., QUANTITY='VELOCITY' /
+&CTRL ID='multiplier', FUNCTION_TYPE='POWER',
+INPUT_ID='SPEED SENSOR','CONSTANT', CONSTANT=2., SETPOINT=10.,
+TRIP_DIRECTION=1 /
+```
+
+### Control Function: PID Control Function
+
+PID（比例积分微分）控制功能是一种常用的反馈控制器，用于控制电气和机械系统。该功能计算过程变量与期望设定点之间的误差。PID 功能的目标是将误差最小化。PID 控制函数的计算公式为
+$$
+u(t)=K_\mathrm{p}e(t)+K_\mathrm{i}\int_0^te(t)\mathrm{d}t+K_\mathrm{d}\frac{\mathrm{d}e(t)}{\mathrm{d}t}
+$$
+其中，$K_p$、$K_i$ 和$ K_d$ 分别是比例加权系数PROPORTIONAL_GAIN、积分加权系数INTEGRAL_GAIN和差分加权系数DIFFERENTIAL_GAIN；e(t) 是输入标识INPUT_ID减去目标值TARGET_VALUE后得到的误差；u(t) 是输出值。
+
+**Example Case: using PID for time integration of mass loss rate**
+
+PID 控制器可用于对热解表面的质量损失进行时间积分。首先，使用 SPATIAL_STATISTIC='SURFACE INTEGRAL' 的 DEVC 作为 PID 控制器的输入。省略 TARGET_VALUE（默认为 0），输入变为误差函数 e(t)。将 INTEGRAL_GAIN 设为 1，其他增益设为 0。然后将 PID 输出发送至 DEVC，以获得 “CONTROL VALUE”。下面是语法示例：
+
+```fortran
+&DEVC ID='MY MLR', XB=..., QUANTITY='BURNING RATE', SURF_ID='s1',
+SPATIAL_STATISTIC='SURFACE INTEGRAL'/
+&CTRL ID='MY PID', FUNCTION_TYPE='PID', INPUT_ID='MY MLR',
+PROPORTIONAL_GAIN=0, DIFFERENTIAL_GAIN=0, INTEGRAL_GAIN=1/
+&DEVC ID='PYROLYZATE', XYZ=..., QUANTITY='CONTROL VALUE', CTRL_ID='MY PID'/
+```
+
+在这里，_devc.csv 文件中 “PYROLYZATE ”列的单位是千克。
+
+**Special Case: using PID for controlling momentum**
+
+PID 控制器可用于调节平均动量源项，以实现与动量相关的各种输出目标。一个简单的例子就是控制通道中的体积流量。在下文中，我们将监控平均流速，并设置 CONTROL_FORCE(1)=T，为 x 动量方程添加一个源项（y 和 z 分别使用 2 和 3）。其结果类似于手动调节 FORCE_VECTOR(1)，以达到所需的流速。在下面的例子中，PID 控制器将使平均体积流量保持在 10 m/s 的 TARGET_VALUE 值附近。
+
+```fortran
+&DEVC ID='Ub', XB=..., QUANTITY='U-VELOCITY', SPATIAL_STATISTIC='MEAN'/
+&CTRL ID='MY PID', FUNCTION_TYPE='PID', TARGET_VALUE=10, INPUT_ID='Ub',
+PROPORTIONAL_GAIN=0.1, CONTROL_FORCE(1)=T/
+&DEVC ID='FORCE X', XYZ=..., QUANTITY='CONTROL VALUE', CTRL_ID='MY PID'/
+```
+
+### Control Function: PERCENTILE
+
+考虑累积分布函数 F(x)：
+$$
+F(x)=\int_{-\infty}^xf(x^{\prime})\mathrm{d}x^{\prime}\left/\int_{-\infty}^\infty f(x^{\prime})\mathrm{d}x^{\prime}\right.
+$$
+PERCENTILE 控制函数返回 F(x) = p 的 x 值，其中 p 是介于 0 和 1 之间的值。 在离散形式中，函数 f (x) 由 1 ≤ i ≤ N 的成对 $(x_i, f_i) $表示。第 p 个百分位数的计算公式为:
+$$
+x(p)=\bar{x}_{k-1}+(\bar{x}_k-\bar{x}_{k-1})\frac{pF_N-F_{k-1}}{F_k-F_{k-1}}
+$$
+其中，
+$$
+F_k=\sum_{i=1}^kf_i\delta\bar{x}_i\quad;\quad\bar{x}_i=\frac{x_{i+1}+x_i}{2}\quad;\quad\delta\bar{x}_i=\bar{x}_i-\bar{x}_{i-1}\quad;\quad k=\min_n\left(F_n>pF_N\right)
+$$
+假设值 xi 是离散函数的中点；也就是说，fi 是函数在区间 $(\bar{x}_{i-1},\bar{x}_{i})$ 上的平均值。
+**PERCENTILE 函数可用于计算火焰高度**。请考虑以下输入行：
+
+```fortran
+&DEVC XB=0,0,0,0,0.05,4.95, QUANTITY='HRRPUL', POINTS=50, Z_ID='z', ID='qdot' /
+&CTRL ID='pct', FUNCTION_TYPE='PERCENTILE', INPUT_ID='qdot', PERCENTILE=0.95 /
+&DEVC ID='L_F', XYZ=0,0,0, QUANTITY='CONTROL VALUE', CTRL_ID='pct', UNITS='m' /
+```
+
+第一条 DEVC 线表示 “HRRPUL ”或单位长度热释放率（千瓦/米）的垂直剖面。这 50 个数值是对两个水平方向上的单位体积热释放率进行积分后得出的。CTRL 功能在 0.05 米到 4.95 米之间的 50 个均匀分布的高度上提取这 50 个值，并计算出火灾能量释放到 95% 的高度。请注意，对于 10 厘米网格，垂直阵列的点位于单元中心，这也是上述离散积分的原因。第二行 DEVC 只是将控制函数计算出的值打印到时间历史记录文件 CHID_devc.csv。HRRPUL "的 50 个值被时间平均化并写入文件 CHID_line.csv。请注意，写入 CHID_devc.csv 的火焰高度是打印输出之间时间间隔的时间平均值。如果将 DT_DEVC 设为很小的值（即小于时间步长），则将获得瞬时火焰高度的时间历史记录。
+
+### Combining Control Functions: A Deluge System
+
+对于淹没式自动喷水灭火系统，当检测事件发生时，通常干燥的自动喷水灭火管道会被淹没。在本例中，检测事件是四个烟雾探测器中的两个报警。淹没管网需要 30 秒。喷嘴是一个名为 “NOZZLE 1 ”的 DEVC，由名为 “nozzle trigger ”的 CTRL 控制。当检测和延时都发生时，喷嘴才会启动。请注意，DEVC 是以 QUANTITY='CONTROL' 指定的。
+
+```fortran
+&DEVC XYZ=1,1,3, PROP_ID='Acme Smoker', ID='SD_1' /
+&DEVC XYZ=1,4,3, PROP_ID='Acme Smoker', ID='SD_2' /
+&DEVC XYZ=4,1,3, PROP_ID='Acme Smoker', ID='SD_3' /
+&DEVC XYZ=4,4,3, PROP_ID='Acme Smoker', ID='SD_4' /
+&DEVC XYZ=2,2,3, PROP_ID='Acme Nozzle', QUANTITY='CONTROL',
+ID='NOZZLE 1', CTRL_ID='nozzle trigger' /
+&CTRL ID='nozzle trigger', FUNCTION_TYPE='ALL', INPUT_ID='smokey','delay' /
+&CTRL ID='delay', FUNCTION_TYPE='TIME_DELAY', INPUT_ID='smokey', DELAY=30. /
+&CTRL ID='smokey', FUNCTION_TYPE='AT_LEAST', N=2,
+INPUT_ID='SD_1','SD_2','SD_3','SD_4' /
+```
+
+**Example Case: control_test_2**
+
+control_test_2 示例演示了数学和 PID 控制功能的使用。定义了两个隔间，左侧隔间初始化为 20 ◦C，右侧隔间初始化为 10 ◦C。控制功能定义为
+
+- 将两个隔间的温度相加
+- 用左侧隔间温度减去右侧隔间温度
+- 左手温度乘以 0.5
+- 用左手温度除以右手温度
+- 取右手温度的平方根
+- 将时间作为目标值为 5 的 PID 函数的输入，$K_p=-0.5$，$K_i=0.001$，$K_d=1$
+
+```fortran
+&CTRL ID='Add',FUNCTION_TYPE='SUM',INPUT_ID='LHS Temp','RHS Temp'/
+&CTRL ID='Subtract',FUNCTION_TYPE='SUBTRACT',INPUT_ID='RHS Temp','LHS Temp'/
+&CTRL ID='Multiply',FUNCTION_TYPE='MULTIPLY',INPUT_ID='LHS
+Temp','CONSTANT',CONSTANT=0.5/
+&CTRL ID='Divide',FUNCTION_TYPE='DIVIDE',INPUT_ID='LHS Temp','RHS Temp'/
+&CTRL ID='Power',FUNCTION_TYPE='POWER',INPUT_ID='RHS Temp','CONSTANT',CONSTANT=0.5/
+&CTRL ID='PID',FUNCTION_TYPE='PID',INPUT_ID='Time',TARGET_VALUE=5.,
+PROPORTIONAL_GAIN=-0.5,INTEGRAL_GAIN=0.001,DIFFERENTIAL_GAIN=1./
+```
+
+结果展示在图18.7。
+
+![image-20241222165459576](./../FUG6.9.1翻译.assets/image-20241222165459576.png)
+
+### Combining Control Functions: A Dry Pipe Sprinkler System
+
+对于干管水喷淋管道系统，通常是用气体对干燥的水喷淋管道加压。当自动喷水灭火系统中的一个喷头启动时，压降会让水流入管网。在此示例中，一旦喷淋器连接装置启动，需要 30 秒钟才能使管网进水。运行所需的事件顺序是：首先必须启动ANY一个链接，从而启动 30 秒的时间延迟（TIME_DELAY）。30 秒延时结束后，每个具有激活链接的喷嘴、ALL控制功能都将开始喷水。
+
+```fortran
+&DEVC XYZ=2,2,3, PROP_ID='Acme Sprinkler Link', ID='LINK 1' /
+&DEVC XYZ=2,3,3, PROP_ID='Acme Sprinkler Link', ID='LINK 2' /
+&PROP ID='Acme Sprinkler Link', QUANTITY='LINK TEMPERATURE',
+ACTIVATION_TEMPERATURE=74., RTI=30./
+&DEVC XYZ=2,2,3, PROP_ID='Acme Nozzle', QUANTITY='CONTROL',
+ID='NOZZLE 1', CTRL_ID='nozzle 1 trigger' /
+&DEVC XYZ=2,3,3, PROP_ID='Acme Nozzle', QUANTITY='CONTROL',
+ID='NOZZLE 2', CTRL_ID='nozzle 2 trigger' /
+&CTRL ID='check links', FUNCTION_TYPE='ANY', INPUT_ID='LINK 1','LINK 2'/
+&CTRL ID='delay', FUNCTION_TYPE='TIME_DELAY', INPUT_ID='check links', DELAY=30. /
+&CTRL ID='nozzle 1 trigger', FUNCTION_TYPE='ALL', INPUT_ID='delay','LINK 1'/
+&CTRL ID='nozzle 2 trigger', FUNCTION_TYPE='ALL', INPUT_ID='delay','LINK 2'/
+```
+
+### Example Case: activate_vents
+
+名为 activate_vents 的简单测试用例演示了几个控制功能。图 18.8 显示了七个不同颜色的通风口，它们会根据特定的定时或控制功能在不同的时间激活。
+
+![image-20241222165639393](./../FUG6.9.1翻译.assets/image-20241222165639393.png)
+
+## Controlling a RAMP
+
+### Changing the Independent Variable
+
+对于任何用户定义的 RAMP，正常的自变量（例如 RAMP_V 的时间）都可以用 DEVC 的输出来代替。具体做法是在 RAMP 输入线之一指定输入 DEVC_ID。此时，DEVC 的当前输出将被用作 RAMP 的自变量。只要控制功能输出的是数值（即数学函数（第 18.5.6 节）或 PID 函数（第 18.5.7 节）），也可以指定 CTRL_ID。在下面的示例中，鼓风机从 20 ◦C 时的 0 % 流量升至温度超过 100 ◦C 时的 50 % 流量，再升至温度超过 200 ◦C 时的 100 % 流量。这与 CUSTOM 控制功能类似，但它允许可变响应，而不仅仅是开或关。
+
+```fortran
+&SURF ID='BLOWER', VEL=-2, RAMP_V='BLOWER RAMP' /
+&DEVC XYZ=2,3,3, QUANTITY='TEMPERATURE', ID='TEMP DEVC' /
+&RAMP ID='BLOWER RAMP', T= 20,F=0.0, DEVC_ID='TEMP DEVC' /
+&RAMP ID='BLOWER RAMP', T=100,F=0.5 /
+&RAMP ID='BLOWER RAMP', T=200,F=1.0 /
+```
+
+### Changing the Dependent Variable
+
+如果在 RAMP 输入中指定了 DEVC_ID_DEP 或 CTRL_ID_DEP，任何 DEVC 或数学 CTRL 的输出都可以用来代替 RAMP。在任一输入中，DEVC 或 CTRL 的数值都将用作 RAMP 输出。例如，利用控制功能内置的数学函数，可以指定正弦函数：
+$$
+f(t)=\sin\left(\frac{2\pi(t-5)}{10}\right)
+$$
+通过以下行：
+
+```fortran
+&DEVC ID='t', QUANTITY='TIME', XYZ=0,0,0 /
+&CTRL ID='t-t0', FUNCTION_TYPE='SUM', INPUT_ID='t','CONSTANT', CONSTANT=-5. /
+&CTRL ID='2*pi*(t-t0)/10', FUNCTION_TYPE='MULTIPLY', INPUT_ID='CONSTANT','t-t0',
+CONSTANT=0.62831853 /
+&CTRL ID='sin(2*pi*(t-t0)/10)', FUNCTION_TYPE='SIN', INPUT_ID='2*pi*(t-t0)/10' /
+&RAMP ID='ramp sin', CTRL_DEP_ID='sin(2*pi*(t-t0)/10)' /
+```
+
+该函数如图18.9所示。
+
+![image-20241222165923332](./../FUG6.9.1翻译.assets/image-20241222165923332.png)
+
+### Freezing the Output Value, Example Case: hrr_freeze
+
+在某些情况下，您可能希望 RAMP 的值停止更新。例如，如果您在一个装有自动喷水灭火装置的房间内模拟火势蔓延，您可能希望在火势上方的自动喷水灭火装置启动时停止火势蔓延。要实现这种操作，可以将 RAMP 的输入更改为 DEVC（请参阅上一节），然后为 DEVC 赋予 NO_UPDATE_DEVC_ID 或 NO_UPDATE_CTRL_ID。当指定控制器的状态变为 T 时，将导致 DEVC 停止更新其值。由于 DEVC 被用作 RAMP 的自变量，因此 RAMP 的输出将保持不变。下面的示例说明了这一点。在 50 秒内，对一场火灾进行从 0 到 1000 kW/m2 的线性 RAMP。RAMP 不使用模拟时间，而是使用 DEVC 来计算时间。当另一个 DEVC 测量时间达到 200 ℃ 时，定时器被设置为冻结。图 18.10 显示了这些输入在测试用例 hrr_freeze 中的结果，可以看出一旦气体温度达到 200 ◦C，热解速率就会停止上升。
+
+```fortran
+&SURF ID='FIRE', HRRPUA=1000., RAMP_Q='FRAMP', COLOR='ORANGE'/
+&RAMP ID='FRAMP', T= 0, F=0, DEVC_ID='FREEZE TIME'/
+&RAMP ID='FRAMP', T=50, F=1/
+&DEVC XYZ=..., QUANTITY='TEMPERATURE', SETPOINT=200., INITIAL_STATE=F,
+ID='TEMP'/
+&DEVC XYZ=..., QUANTITY='TIME', NO_UPDATE_DEVC_ID='TEMP', ID='FREEZE TIME'/
+```
+
+![image-20241222170143063](./../FUG6.9.1翻译.assets/image-20241222170143063.png)
+
+需要注意的是，设备是按照输入文件中列出的顺序依次更新的，不同网格中的设备在一个时间步结束前不会共享数值。这就意味着，如果被冻结的设备位于不同的网格上，或者列在冻结设备之前，那么在下一个时间步之前它都不会被冻结。
+
+## Visualizing FDS Devices in Smokeview
+
+本节概述了 Smokeview 可以绘制的各种对象以及如何自定义其外观。更多技术细节请参阅 Smokeview 用户指南 [^17]。
+
+### Devices that Indicate Activation
+
+自动喷水灭火器和烟雾探测器等设备可以通过两种方式之一来显示已激活。当 FDS 确定某个设备已激活时，它会在 .smv 文件中放置一条信息，说明对象编号、激活时间和状态（0 表示未激活或 1 表示激活）。然后 Smokeview 绘制相应的对象。有关图像，请参见表 18.3 和表 18.4。
+
+PROP 行中的字符串 SMOKEVIEW_ID 将 FDS 设备与 Smokeview 对象关联起来。例如，下面几行指示 Smokeview 将设备绘制成 “target ”形状：
+
+```fortran
+&PROP ID='my target', SMOKEVIEW_ID='target' /
+&DEVC XYZ=0.5,0.8,0.6, QUANTITY='TEMPERATURE', PROP_ID='my target' /
+```
+
+<center>Table 18.3: Single frame static objects</center>
+
+![image-20241222170627365](./../FUG6.9.1翻译.assets/image-20241222170627365.png)
+
+<center>Table 18.4: Dual frame static objects</center>
+
+![image-20241222170654430](./../FUG6.9.1翻译.assets/image-20241222170654430.png)
+
+![image-20241222170714777](./../FUG6.9.1翻译.assets/image-20241222170714777.png)
+
+### Devices with Variable Properties
+
+可以使用 PROP 行中名为 SMOKEVIEW_PARAMETERS 的字符串数组指定的数据修改 Smokeview 对象的外观。例如，输入行
+
+```fortran
+&PROP ID='ballprops', SMOKEVIEW_ID='ball',
+SMOKEVIEW_PARAMETERS(1:6)='R=255','G=0','B=0','DX=0.5','DY=0.25','DZ=0.1' /
+&DEVC XYZ=0.5,0.8,1.5, QUANTITY='TEMPERATURE', PROP_ID='ballprops' /
+```
+
+创建一个 x、y 和 z 轴直径分别为 0.5 米、0.25 米和 0.1 米的红色椭圆体。请注意，这些参数都用单引号括起来，因为它们是传递给 Smokeview 的字符串。
+
+表 18.5 列出了具有可变属性的对象。请注意，tsphere 对象使用纹理贴图或图像来改变其外观。纹理贴图是通过在纹理文件名前添加 t% 字符来指定的，例如 t%texturefile.jpg。
+
+<center>Table 18.5: Dynamic Smokeview objects</center>
+
+![image-20241222170919087](./../FUG6.9.1翻译.assets/image-20241222170919087.png)
+
+![image-20241222170935434](./../FUG6.9.1翻译.assets/image-20241222170935434.png)
+
+### Objects that Represent Lagrangian Particles
+
+拉格朗日粒子（如水滴或小固体颗粒）在 Smokeview 中表示为微小的点。不过，也可以用其他方式绘制拉格朗日粒子，如表 18.6 所示。例如，以下线条定义的粒子代表 10 厘米长、直径 1.24 厘米的电缆线段：
+
+```fortran
+&PART ID='cables', QUANTITIES(1)='PARTICLE TEMPERATURE', ..., PROP_ID='cable image' /
+&PROP ID='cable image', SMOKEVIEW_ID='tube', SMOKEVIEW_PARAMETERS='L=0.1','D=0.0124' /
+```
+
+默认情况下，电缆颜色为黑色，但您也可以使用 R、G 和 B 参数指定自己的默认颜色。此外，您还可以根据 PART行中列出的 QUANTITIES为粒子着色。Smokeview 中的菜单允许您在各种颜色选项之间切换。
+
+您可以使用 “RANDXY=1 ”等参数控制 “tube ”对象的方向，使圆柱体在 x-y 平面上随机绘制。参数为 U-VEL、V-VEL 和 W-VEL 的对象会根据与移动粒子相关的速度分量进行拉伸。
+
+<center>Table 18.6: Dynamic Smokeview objects for Lagrangian particles</center>
+
+![image-20241222171202208](./../FUG6.9.1翻译.assets/image-20241222171202208.png)
+
+![image-20241222171221938](./../FUG6.9.1翻译.assets/image-20241222171221938.png)
+
+## External Control of FDS (Beta)
+
+在模拟运行时，可以从外部控制 FDS 模拟的某些方面。任何以 RAMP_ID 或 CTRL_ID 作为输入的 FDS 输入都可以进行外部控制。通过在 RAMP 上设置 EXTERNAL_FILE，可以从外部控制 RAMP。通过设置 FUNCTION_TYPE=“EXTERNAL”，可以从外部控制 CTRL。
+
+选择外部控制时，FDS 将根据一个 csv 文件中的值设置 RAMP 值或 CTRL 的逻辑状态，该文件的名称由 MISC 上的 EXTERNAL_FILENAME 指定。该文件将每隔 DT_EXTERNAL on TIME 秒钟检查一次，以获取新值。只有那些数值正在更改的输入才需要指定。对于未指定的输入值，或者文件不存在或无法打开（例如在文件写入过程中被操作系统锁定），将保留当前值。初始值通过 RAMP 的 INITIAL_VALUE 或 CTRL 的 INITIAL_STATE 来定义。
+
+csv 文件格式为
+
+```fortran
+Type(1), ID(1), Value(1)
+Type(2), ID(2), Value(2)
+.
+.
+```
+
+其中，Type 是 RAMP 或 CTRL，ID 是 FDS 输入文件中的相应 ID，Value 是 RAMP 的新输出值或 CTRL 的新逻辑状态，正值表示 CTRL 评估为 TRUE，负值表示函数评估为 FALSE。
+
+下面是一组输入示例：
+
+```fortran
+&MISC EXTERNAL_FILENAME='external_test_input.csv'/
+&TIME T_END=10,DT_EXTERNAL=5/
+&OBST XB=0.0,0.1,0,1,0,1/
+&VENT XB=0.1,0.1,0,1,0,1,SURF_ID='FLOW',CTRL_ID='VENT CTRL'/
+&SURF ID='FLOW',VEL=-1,COLOR='BLUE',TAU_V=0/
+&CTRL ID='VENT CTRL',FUNCTION_TYPE='EXTERNAL',INITIAL_STATE=T/
+&VENT XB=2,2,0,1,0,1,SURF_ID='HOT'/
+&SURF ID='HOT',TMP_FRONT=1000,RAMP_T='T RAMP',COLOR='RED'/
+&RAMP ID='T RAMP',EXTERNAL_FILE=T,INITIAL_VALUE=0.081633/
+```
+
+在这些输入中，一个具有固定速度的通风口由一个初始为 TRUE 的 CTRL 外部控制，一个具有固定温度的通风口由一个初始斜坡值为 100 ◦C (:question:这为啥是100℃）的 RAMP 外部控制。这些通风口应用于 1 立方米箱体的两个面。5 秒钟后，读取 csv 文件的内容：
+
+```fortran
+RAMP,"T RAMP" , 1
+CTRL,"VENT CTRL",-1
+```
+
+这将关闭速度通风口（负 CTRL 值表示将状态设置为 .FALSE.），并将固定温度通风口设置为 1000 ◦C（RAMP 值为 1 表示应用 TMP_FRONT 的全部值）。请注意，ID 字符串是用引号括起来的。只有在字符串中有空格或逗号时才需要这样做。运行结果如图 18.11 所示
+
+![image-20241222171557674](./../FUG6.9.1翻译.assets/image-20241222171557674.png)
+
+# Numerical Considerations
+
 
 
 ****
 
-[^15-1]:CVF表示小于给定直径的液滴在总质量中所占的比例。
-[^15-2]:CNF 表示总液滴中直径小于给定直径的部分。
-[^15-3]:默认情况下，颗粒大小范围被分为六个分区，采样的颗粒被划分到这些分区中。这样可以确保在整个粒度范围内分配到合理数量的粒子。要更改默认的分仓数，请在 PART 行设置 N_STRATA。
+[^18-1]:请注意，将遮蔽率从 %/ft 单位转换为 %/m 单位的公式如下：$O[\%/\mathfrak{m}]=\left[1-\left(1-\frac{O[\%/\mathfrak{ft}]}{100}\right)^{3.28}\right]\times100$
 
 # Alphabetical List of Input Parameters
 
@@ -5360,6 +6730,14 @@ ENDDO
 [^45]:T. Bartzanas, T. Boulard, and C. Kittas. Numerical simulation of the airflow and temperature distribution in a tunnel greenhouse equipped with insect-proof screens in the openings. Computers and Electronics in Agriculture, 34:207–221, 2002. 215
 [^46]:P. Andersson and P. Van Hees. Performance of Cables Subjected to Elevated Temperatures. In Fire Safety Science – Proceedings of the Eighth International Symposium, pages 1121–1132. International Association of Fire Safety Science, 2005. 215
 [^47]:S.P. Nowlen, F.J. Wyant, and K.B. McGrattan. Cable Response to Live Fire (CAROLFIRE). NUREG/CR 6931, United States Nuclear Regulatory Commission, Washington, DC, April 2008. 216
+[^48]:S.R. Hanna, G.A. Briggs, and R.P. Hosker. Handbook on Atmospheric Diffusion. DOE/TIC 11223, U.S. Department of Energy, 1982. Available through the National Technical Information Service, U.S. Department of Commerce, Springfield, Virginia. 230
+[^49]:A.J. Dyer. A review of flux profile relationships. Boundary-Layer Meteorology, 7:363–372, 1974. 231
+[^50]:R.B. Stull. Meteorology for Scientists and Engineers. Brooks/Cole, Pacific Grove, California, 2nd edition, 2000. 232, 236, 237
+[^51]:J.H. Klote and J.A. Milke. Design of Smoke Management Systems. American Society of Heating Refrigeration, and Air-Conditioning Engineers and Society of Fire Protection Engineers, Atlanta, Georgia, 1992. 242
+[^52]:G. Heskestad and R.G. Bill. Quantification of Thermal Responsiveness of Automatic Sprinklers Including Conduction Effects. Fire Safety Journal, 14:113–125, 1988. 275
+[^53]:T. Cleary, A. Chernovsky, W. Grosshandler, and M. Anderson. Particulate Entry Lag in Spot-Type Smoke Detectors. In Fire Safety Science – Proceedings of the Sixth International Symposium, pages 779–790. International Association for Fire Safety Science, 1999. 282
+[^54]:M.J. Hurley, editor. SFPE Handbook of Fire Protection Engineering. Springer, New York, 5th edition, 2016. 282
+
 # 工业界的咨询资源【网站】
 
 - 私立或工业机构：
