@@ -6117,13 +6117,1884 @@ CTRL,"VENT CTRL",-1
 
 ![image-20241222171557674](./../FUG6.9.1翻译.assets/image-20241222171557674.png)
 
+****
+
+[^18-1]: 请注意，将遮蔽率从 %/ft 单位转换为 %/m 单位的公式如下：$O[\%/\mathfrak{m}]=\left[1-\left(1-\frac{O[\%/\mathfrak{ft}]}{100}\right)^{3.28}\right]\times100$
+
 # Numerical Considerations
+
+本章介绍各种数值参数，即控制如何求解支配方程的参数。这些参数大多在 MISC 行中指定，对于大多数大规模火灾模拟，建议使用其默认值。MISC 是输入参数的命名列表组，不属于任何一个类别（表 23.17）。
+
+良好做法是在数据文件中只使用一行 MISC。也可以使用多行 MISC，但要注意不要写入过多参数。最后读取的参数优先。
+
+## Simulation Mode
+
+FDS 有四种基本运行模式：“DNS”（直接数值模拟）、“LES”（大涡模拟）、“VLES”（超大涡模拟）和 “SVLES”（简化物理的简单超大涡模拟-VLES）。这些模式控制着一系列物理和数值参数，它们决定着数值模型的物理水平和精度。使用 MISC 行中的 SIMULATION_MODE 指定这些模式。例如
+
+```fortran
+&MISC ..., SIMULATION_MODE='DNS' /
+```
+
+表示直接数值模拟。**默认值为 “VLES”。**
+
+表 19.1 列出了四种模拟模式中每种模式的各种参数值以及详细说明这些参数的章节。
+
+<center>Table 19.1: Parameters effected by SIMULATION_MODE.</center>
+
+![image-20241223083604010](./../FUG6.9.1翻译.assets/image-20241223083604010.png)
+
+## Large Eddy Simulation Parameters
+
+默认情况下，FDS 使用 Deardorff [^55] [^56] 湍流粘度
+$$
+(\mu_{\mathrm{LES}}/\rho)=C_{\nu}\Delta\sqrt{k_{\mathrm{sgs}}}
+$$
+其中，Cν = 0.1，子网格尺度（sgs）动能取自基于尺度相似性的代数关系（见《FDS 技术参考指南》[^29]）。LES 滤波宽度取各方向局部网格间距的几何平均值[^19-1]，$\Delta =(\delta x\delta y\delta z)^{1/3}$。您也可以通过**在 MISC 行设置 FIXED_LES_FILTER_WIDTH 来选择恒定的滤波器宽度，单位为米**。实际操作中不建议这样做，但可能对收敛研究和其他诊断测试有用。
+
+表 19.2 列出了 MISC 行 TURBULENCE_MODEL 的选项。请注意，FDS 1-5 版使用的模型是 “CONSTANT SMAGORINSKY”。热导率和材料扩散率与湍流粘度的关系如下
+$$
+k_{\mathrm{LES}}=\frac{\mu_{\mathrm{LES}}c_p}{\mathrm{Pr_t}}\quad;\quad(\rho D)_{\mathrm{LES}}=\frac{\mu_{\mathrm{LES}}}{\mathrm{Sc_t}}
+$$
+湍流普朗特数 Prt 和湍流施密特数 Sct 在给定情况下被假定为常数。虽然不建议在大多数计算中使用，但**可以通过 MISC 行的 PR 和 SC 参数修改 Prt = 0.5 和 Sct = 0.5**。FDS 技术参考指南[^29]对这些参数进行了更详细的讨论。
+
+<center>Table 19.2: Turbulence model options.</center>
+
+| TURBULENCE_MODEL       | Description                              | Coefficient(s) |
+| ---------------------- | ---------------------------------------- | -------------- |
+| ’CONSTANT SMAGORINSKY’ | Constant-coefficient Smagorinsky [^57]   | C_SMAGORINSKY  |
+| ’DYNAMIC SMAGORINSKY’  | Dynamic Smagorinsky [^58][^59]           | None           |
+| ’DEARDORFF’            | Deardorff [^55][^56]                     | C_DEARDORFF    |
+| ’VREMAN’               | Vreman’s eddy viscosity [^60]            | C_VREMAN       |
+| ’WALE’                 | Wall-Adapting Local Eddy-viscosity [^61] | C_WALE         |
+
+**Near-Wall Turbulence Model**
+
+默认情况下，FDS 使用 Nicoud 和 Ducros [^61]的 WALE 模型来计算第一个离墙网格单元中的涡流粘度，因为 Deardorff 模型的测试滤波操作在靠近墙时定义不清。WALE 模型的优点是，在接近无滑移条件适用的壁面时，涡流粘度会以正确的速率趋于零。
+
+作为替代方案，您可以选择使用带有Van Driest阻尼的恒定系数 Smagorinsky [^57]模型（见 [^62]）。要调用该模型，请在 SURF 行设置 NEAR_WALL_TURBULENCE_MODEL='VAN DRIEST'。
+
+为了诊断目的，或者在上述其他壁面模型都不合适的情况下，可以使用 NEAR_WALL_EDDY_VISCOSITY 为给定的 SURF 设置近壁运动涡流粘度的恒定值。
+请注意，近壁湍流模型设置的是近壁涡粘度$\mu_t$，而不是近壁应力$\tau_w$。如第 10.1.7 节所述，壁面应力取决于壁面函数的选择。
+
+## Numerical Stability Parameters
+
+FDS 采用显式时间推进方案；因此，时间步长在保持数值稳定性和精度方面起着重要作用。下面我们将研究在存在平流、扩散以及速度场和标量场膨胀的情况下，保持稳定所需的时间步长约束。此外，还有确保各种算法精度的其他约束条件。
+
+### The Courant-Friedrichs-Lewy (CFL) Constraint
+
+众所周知的 CFL 约束条件如下
+$$
+\mathrm{CFL}=\delta t\frac{\|\mathbf{u}\|}{\Delta}<1
+$$
+由于平流速度的原因，时间步长受到限制。CFL 的限制由 MISC 上的 CFL_MIN（默认值 0.8）和 CFL_MAX（默认值 1）设置。从物理角度看，该限制要求流体元素在一个时间步长 $\delta t$ 内穿越的单元宽度不得超过一个单元宽度 Δ。**对于 LES 来说，这一约束条件还有一个好处，就是可以使隐式时间和空间滤波器保持一致**。换句话说，**为了分辨大小为 Δ 的漩涡，时间步长必须符合 CFL 约束条件**。如果采用隐式方案，时间步长是 CFL 极限的 10 倍，那么可分辨的最小湍流运动大约是网格间距的 10 倍，这将严重限制使用 LES 的好处。在大多数情况下，如果您**希望模拟运行得更快，更好的策略是在保持 CFL 接近 1 的情况下粗化网格分辨率**。
+
+保持稳定所需的确切 CFL 取决于时间积分方案的阶次（以及其他属性）和速度规范的选择。FDS 中有四种速度标准可供选择（在 MISC 上设置）：
+
+CFL_VELOCITY_NORM=0 (相当于速度矢量的$L_{\infty}$范数，尽管数值代码对此的限制比 1 或 2 要少）
+$$
+\frac{\|\mathbf{u}\|}{\Delta}=\max\left(\frac{|u|}{\delta x},\frac{|v|}{\delta y},\frac{|w|}{\delta z}\right)+|\nabla\cdot\mathbf{u}|
+$$
+CFL_VELOCITY_NORM=1 (DNS 和 LES 默认值，最严格，对应于速度矢量的$L_{1}$范数）
+$$
+\frac{\|\mathbf{u}\|}{\Delta}=\frac{|u|}{\delta x}+\frac{|v|}{\delta y}+\frac{|w|}{\delta z}+|\nabla\cdot\mathbf{u}|
+$$
+CFL_VELOCITY_NORM=2 (VLES 默认值，速度矢量的$L_{2}$范数）
+$$
+\frac{\|\mathbf{u}\|}{\Delta}=\sqrt{\left(\frac{u}{\delta x}\right)^2+\left(\frac{v}{\delta y}\right)^2+\left(\frac{w}{\delta z}\right)^2}+|\nabla\cdot\mathbf{u}|
+$$
+CFL_VELOCITY_NORM=3 (SVLES 默认值，限制最少，相当于速度矢量的$L_{\infty}$范数，不含速度散度）
+$$
+\frac{\|\mathbf{u}\|}{\Delta}=\max\left(\frac{|u|}{\delta x},\frac{|v|}{\delta y},\frac{|w|}{\delta z}\right)
+$$
+最后列出的约束形式是限制最少的，但也是最危险的，因为当 CFL 约束限制最少时，数值不稳定性更容易发生。这种选择类似于计算机程序编译器的高优化级别--在增加的速度和增加的失败风险之间需要权衡。
+
+请注意，CFL 规范 0-2 包括速度场的散度。这是一种额外的保障措施，因为当能量突然释放，单个网格单元内的发散值相应增大时，往往会出现数值不稳定性。在连续性方程的显式欧拉更新中，如果时间增量过大，网格单元的质量可能会被完全耗尽，这当然不是物理现象。因此，$\rho^{n+1}>0$ 的约束条件导致了对时间步长的如下限制：
+$$
+\delta t<\frac{\rho^{n}}{\overline{\mathbf{u}}^{n}\cdot\nabla\rho^{n}+\rho^{n}\nabla\cdot\mathbf{u}^{n}}\label{19-8}\tag{19-8}
+$$
+我们可以认为，我们最关心的情况是 $\rho_n$ 接近于零。因此，$\eqref{19-8}$的合理近似值为
+$$
+\delta t<\frac{\rho}{\overline{u}_i\left(\frac{\rho-0}{\delta x_i}\right)+\rho\nabla\cdot\mathbf{u}}=\left[\frac{\overline{u}_i}{\delta x_i}+\nabla\cdot\mathbf{u}\right]^{-1}\label{19-9}\tag{19-9}
+$$
+公式$\eqref{19-9}$在 CFL 约束中加入了热膨胀效应。此外，要注意的是，点积意味着对下标 i 求和，这为使用 CFL_VELOCITY_NORM=1 中速度矢量的$L_1$范数提供了动力。
+
+**Handling cells with large aspect ratios** 在 LES 中，通常最好使用立方体单元来准确捕捉湍流。然而，在某些情况下，为了提高计算效率，需要使用细长或薄饼状的单元，通常是在隧道或大气流动应用中。随着单元长宽比的增加，时间步长限制的速度准则选择变得更加重要。数值实验表明，当长宽比超过约 4:1 时，需要使用 CFL_VELOCITY_NORM=1，以避免环境温度的非物理振荡。因此，如果 FDS 输入文件中没有明确说明，在最大单元长宽比为 4:1 之后，FDS 将自动切换稳定性检查，使用 CFL_VELOCITY_NORM=1。FDS 使用的速度规范将在输出文件 (CHID.out) 中报告。
+
+**Time step restrictions to avoid clipping** 如果 CFL 约束不足以维持可实现的质量分数（$0 ≤ Z_{\alpha} ≤ 1$），则 FDS 将尝试将质量重新分配到相邻的单元格中，如《FDS 技术指南》[^29] 所述。如果失败，则将应用 10%的时间步长限制，并重申质量输运方程。控制时间步长限制的次数将在第 19.5 节中讨论。
+
+### The Von Neumann Constraint
+
+Von Neumann约束条件为
+$$
+\mathrm{VN}\equiv2\delta t\max\left[\frac{\mu}{\rho},D_\alpha\right]\left(\frac{1}{\delta x^2}+\frac{1}{\delta y^2}+\frac{1}{\delta z^2}\right)<1
+$$
+VN 的限制可通过 MISC 上的 VN_MIN（所有形式的 LES 默认为 0.8，DNS 默认为 0.4）和 VN_MAX（所有形式的 LES 默认为 1.0，DNS 默认为 0.5）进行调整。我们可以通过几种不同的方式来理解这种限制。首先，我们可以考虑物种 $\alpha$在方向 i 上的扩散速度模型：$V_{\alpha ,i}Y_{\alpha}=-D_{\alpha}\partial Y_{\alpha}/\partial x_i$，这样我们就会发现，VN 只是由于扩散传输而产生的 CFL 约束。
+
+我们也可以从总变异递减（TVD）约束的角度来理解 VN。也就是说，如果标量场中存在变化（曲率），我们就不希望产生虚假振荡，因为虚假振荡会导致平滑步长过大，从而导致不稳定。下面是关于u的一维热方程的显式更新。这里的下标表示网格指数，$\nu $是扩散率。
+$$
+u_i^{n+1}=u_i^n+\frac{\delta t\nu}{\delta x^2}(u_{i-1}^n-2u_i^n+u_{i+1}^n)
+$$
+非常简单，注意如果 $\delta t\mathrm{~}\nu/\delta x^2=1/2$ 则 $u_i^{n+1}=(u_{i-1}^n+u_{i+1}^n)/2$。如果时间步长再大一些，我们就会超越连接相邻单元值的直线。当然，只有在 u 场 “平滑 ”的情况下，才能保证这一限制是 TVD；否则，相邻单元值可能会向相反的方向移动。遗憾的是，**在 LES 中并没有这样的保证，因此 VN 约束在产生不稳定性方面可能会特别致命**。因此，一些实践者喜欢采用隐式方法来计算扩散项。**在所有仿真模式中，VN 约束都是默认检查的。**可以通过在 MISC 上设置 CHECK_VN=F 关闭该功能。
+
+### Stability of particle transport
+
+拉格朗日粒子在一个时间步长内的运动是通过解析解计算出来的，无论流动求解器使用哪个时间步长，都能保持稳定。但是，如果粒子在一个时间步中移动了多个网格单元的宽度，粒子和气体之间传递的动量就无法正确分配到所有受影响的单元。为了解决这个问题，FDS 根据每个粒子的速度细分气相时间步。例如，如果粒子在一个气相时间步中穿过了两个单元，那么它的轨迹就是通过将时间步细分为两个来计算的。
+
+不过，在某些粒子速度极快的情况下，为了保证整体流动行为的稳定性，可能需要设置一个额外参数，根据模拟中最快粒子的速度来限制流动求解器的时间步长。该约束的实际值通过 MISC 行中的 PARTICLE_CFL_MAX 来设置。数值为 1（默认值）表示移动最快的粒子在时间步长内可以移动一个网格单元的距离。由于极快的喷嘴速度会导致极小的时间步长，从而延长运行时间，因此 PARTICLE_CFL 约束条件默认设置为 F。在 MISC 行将 PARTICLE_CFL 设置为 T 将激活该约束。
+
+### Heat Transfer Constraint
+
+注意热通量$\dot q_c^{\prime\prime}$，单位为$W/m^2$。因此，可能从$(\dot q_c^{\prime\prime}/\rho_w)^{1/3}$得出速度尺度，$\rho_w$是壁面上的气相密度。任意时刻都需要求解速度尺度，而且有一个CFL类型的稳定性限制。因此，在所有壁面单元上进行传热稳定性检查以确保$\delta t<(\delta x/2)/(\dot{q}_{\mathrm{c}}^{\prime\prime}/\rho_{\mathrm{w}})^{1/3}$。**可以通过在MISC行上的CHECK_HT来激活该检查。其默认值为F**。
+
+## Flux Limiters
+
+FDS 采用总变异递减（TVD）方案进行标量传输。VLES 的默认方案（FDS 默认 SIMULATION_MODE）是 Superbee[^63]，之所以选择 Superbee，是因为在网格分辨率较粗的高湍流中，该方案能最好地保留标量方差。DNS 和 LES 的默认方案是 CHARM [^64]，因为 Superbee 中使用的梯度陡化技术会在高分辨率下产生阶梯模式，而 CHARM 是收敛的。为完整起见，还包括其他一些方案（包括戈杜诺夫Godunov和中心差分）；更多详情请参见《技术指南》[^24]。下表 19.3 列出了可用于调用各种限制器方案的字符串。
+
+```fortran
+&MISC FLUX_LIMITER='GODUNOV' / ! invoke Godunov (first-order upwind scheme)
+```
+
+<center>Table 19.3: Flux limiter options.</center>
+
+![image-20241223092827554](./../FUG6.9.1翻译.assets/image-20241223092827554.png)
+
+## Limiting the Bounds of Key Variables
+
+FDS 中的算法设计为在一定的密度、温度和质量分数值范围内工作。为防止出现非物理结果，对这些变量设置了限制，以防止单一的虚假值导致数值不稳定。它还能防止调用与温度有关的查找表时出现超出范围的错误。默认情况下，FDS 会根据您的输入确定变量的最低值和最高值，但并不是在所有情况下都能预知给定值的高低。因此，在极少数情况下，您可能需要设置密度或温度的上限或下限。温度和密度界限在名为 CLIP 的命名列表组下输入。表 23.3 列出了这些参数。只有当您在 Smokeview 中检查结果时发现其中一个参数被 “截断 ”时，才需要设置这些值。对于典型的火灾情况，您无需设置这些值，但如果您预计异常情况下的值相对较低或较高，请查看计算结果以确定是否需要更改边界。
+
+### Temperature
+
+气体温度不能直接求解。相反，气体密度和种类质量分数通过状态方程决定气体温度。不过，在计算液滴和固体障碍物的温度时，确实会用到温度边界。默认边界为
+$$
+\min\left(T_\infty,T_\mathrm{m}\right)-10<T<2727\quad \text{℃}
+$$
+其中，$T_{\infty}$ 是用户指定的环境温度，$T_m$ 是水的熔化温度。用户指定的温度（如初始固体或液滴温度）会扩大这些界限。要设置自己的界限，请在 CLIP 行中使用 MINIMUM_TEMPERATURE 和/或 MAXIMUM_TEMPERATURE。
+
+与高温有关的另一个考虑因素是，FDS 使用的表列气体和固体属性数据的最高温度为 5000 K。如果出于某种原因您希望温度更高，请在 MISC 行设置整数参数 I_MAX_TEMP。这将设置许多属性数组的上限维数。尽管该参数是一个整数，但可以将其视为以 K 为单位的最高温度。需要注意的是，与温度相关的属性（如温度高于 5000 K 时的比热）将保持不变，但像焓这样的综合量会考虑到更高的温度。
+
+### Density
+
+气体密度的自然下限为零，但如果单元格中的密度降低到接近零，由于状态方程的原因，温度会升高到一个极高的值。因此，默认情况下密度保持在以下范围内：
+$$
+\min\left(0.1\rho_\infty,\frac{2p_\infty W_{\min}}{RT_{\max}}\right)<\rho<\frac{2p_\infty W_{\max}}{RT_{\min}}
+$$
+其中，Wmin 和 Wmax 是跟踪气体种类分子量的最小值和最大值，单位为 g/mol；R 是通用气体常数，8314.5 J/（kmol-K）。Tmin 和 Tmax 如上所述。要覆盖密度限制，请在 CLIP 行中指定 MINIMUM_DENSITY 和/或 MAXIMUM_DENSITY，单位为 kg/m3。
+
+密度和质量分数的剪切违反质量守恒，因此最好尽可能避免剪切。如第 19.3 节所述，时间步长的设置应符合流场的 CFL 约束条件。适当的 DT 与通量限制器相结合通常可以避免剪切。除此之外，FDS 还采用了质量再分配方案，详见《FDS 技术指南》[^29]。如果失败，还可以尝试避免剪切--将时间步长减小 10%（$\delta t_{\mathrm{new}}=0.9\delta t$），并重申标量输运方程。这一过程最多进行 CLIP_DT_RESTRICTIONS_MAX 次；默认为 5 次。在某些非常极端的情况下，这一循环会使时间步长进入数值不稳定范围（$\delta t/\delta t_{\mathbf{init}}<\mathrm{LIMITING\_DT\_RATIO}$）。您可以通过设置 CLIP 行的 CLIP_DT_RESTRICTIONS_MAX 参数来控制时间步长限制的最大数量（设置为 0 可完全绕过该算法）。在 CHID.out 文件中会记录特定时间步的限制次数（如果有）。
+
+****
+
+[^19-1]:除几何平均滤波宽度类型外，另一种方法是使用最大单元尺寸 $\Delta =(\delta x\delta y\delta z)$。这种方法应尽量少用，但在单元长宽比较大时可能有必要使用。在 MISC 上使用 LES_FILTER_TYPE='MAX'，会导致湍流粘度值增大，因而数值解的耗散性更强。
+
+# Changing the Initial Conditions
+
+通常情况下，FDS 模拟从 t = 0 时的环境条件开始。假定空气温度随高度不变，密度和压力随高度（z 方向）降低。这种降低在大多数建筑物规模的计算中并不明显，但在大型室外模拟中却很重要。
+
+在某些情况下，使用命名列表关键字 INIT（表 23.13）更改域的矩形区域内的环境条件非常方便。**可以有多条 INIT 线。**如果由 INIT 定义的两个矩形区域重叠，则重叠区域中的第一个区域优先（即先到先得）所有共同定义的输入。也就是说，不可能用第二个 INIT 行明确定义的初始条件覆盖第一个 INIT 行明确指定的初始条件。<u>不过，在第二行 INIT 中定义的、但在第一行 INIT 中没有定义的输入仍将被应用</u>。
+
+## Gas Species
+
+物种浓度的初始化方法如下：
+
+```fortran
+&INIT XB=0.0,0.1,0.0,0.025,0.0,0.1,
+SPEC_ID(1)='OXYGEN', MASS_FRACTION(1)=0.23,
+SPEC_ID(2)='PROPANE', MASS_FRACTION(2)=0.06 /
+```
+
+其中，XB 表示域内的一个矩形体积，氧气和丙烷的初始质量分数将分别初始化为 0.23 和 0.06。请注意以下规则：
+
+- SPEC_ID 和 MASS_FRACTION 指数并不一定代表输入文件中物种的排列顺序，而是应该从 1 开始连续排列。
+- VOLUME_FRACTION(N) 可以代替 MASS_FRACTION(N)，只要它们不在同一输入行中同时使用即可。
+- **在同一 INIT 行指定所有物种组件**。
+- **背景气体种类的初始浓度不能以这种方式指定。**背景气体的质量或体积分数将根据未指定的分数进行设置。
+- 必须使用 SPEC 或 REAC 命名列表组指定所有气体种类。换句话说，列出的任何种类都必须进行单独跟踪，而不仅仅是一个集合种类的组成部分。详见第 12 章。
+- **您可以使用快捷方式 DB='WHOLE DOMAIN' 代替 XB=...，这相当于指定整个域作为初始化区域**。
+
+## Temperature and Pressure
+
+您可以使用 MISC 线路上的以下参数设置环境温度和压力：
+
+P_INF 背景压力（地面），单位 Pa。默认值为 101325 Pa。
+
+TMPA 环境温度，即模拟开始时所有物体的温度。默认值为 20 ◦C。
+
+要修改域中某些区域的局部初始温度，请添加以下表格、
+
+```fortran
+&INIT XB=0.0,0.1,0.0,0.025,0.0,0.1, TEMPERATURE=60. /
+```
+
+这表示在 XB 给出的范围内，温度应为 60 ◦C，而不是环境温度。INIT 结构可能有助于检查建筑物内堆栈效应的影响，因为建筑物内外的温度是不同的。如果您想初始化同一体积内的温度和物种，这两个量将使用相同的 INIT 行
+
+```fortran
+&INIT XB=0.0,0.1,0.0,0.025,0.0,0.1,
+MASS_FRACTION(1)=0.23, SPEC_ID(1)='OXYGEN',
+MASS_FRACTION(2)=0.06, SPEC_ID(2)='PROPANE',
+TEMPERATURE=60. /
+```
+
+## Density
+
+在指定初始密度时，重要的是要认识到 FDS 求解控制方程的顺序。在下面的示例中，初始物种质量分数、温度和密度均在同一体积中初始化。
+
+```fortran
+&INIT XB=0.0,0.1,0.0,0.025,0.0,0.1,
+MASS_FRACTION(1)=0.23, SPEC_ID(1)='OXYGEN',
+MASS_FRACTION(2)=0.06, SPEC_ID(2)='PROPANE',
+TEMPERATURE=60., DENSITY=1.13 /
+```
+
+这种情况是我们过多地指定了参数。**由于温度是使用指定的密度根据状态方程计算出来的，因此一般来说，指定的温度不会满足状态方程的要求，FDS 将覆盖指定的温度**。
+
+## Heat Release Rate Per Unit Volume
+
+INIT 行也可用于指定容积热源项。例如
+
+```fortran
+&INIT XB=0.0,0.1,0.0,0.025,0.0,0.1, HRRPUV=1000., RADIATIVE_FRACTION=0.25 /
+```
+
+表示以 XB 为界的区域将产生 1000 kW/m3 的功率，其中 25% 为辐射功率。RADIATIVE_FRACTION 的默认值为 0。该功能主要用于诊断或以非常简单的方式模拟火灾。您可以通过 RAMP_Q 指定体积热源的时间斜坡。例如
+
+```fortran
+&RAMP ID='q1', T=0, F=0/
+&RAMP ID='q1', T=60, F=1/
+&INIT XB=0.0,0.1,0.0,0.025,0.0,0.1, HRRPUV=1000., RAMP_Q='q1' /
+```
+
+在 60 秒内将热源从 0 线性提升到 1000 kW/m3。
+
+## Velocity Field
+
+### Default Initial Velocity Field
+
+FDS 用极小量的 “噪声 ”对流场进行初始化，以防止在边界和初始条件完全对称的情况下产生完全对称的流动。具体做法是在每个单元中添加一个随机漩涡。要关闭此功能，请设置 NOISE=F。要控制噪声量（即漩涡的最大强度），请设置 NOISE_VELOCITY。默认值为 0.005 米/秒。
+
+FDS 的随机数生成器使用预定义的随机种子，确保每个网格都有不同的随机数种子。预定义种子意味着所有模拟都将对给定网格使用相同的随机数序列。您可以通过在 MISC 行中指定 RND_SEED 来更改随机种子。这定义了一个常量值，将添加到每个网格的预定义随机种子中。
+
+### Turning off the Flow Field
+
+对于某些类型的诊断测试，关闭速度场并对模型的其他方面（如辐射或粒子输运）进行练习是非常有用的。为此，请在 MISC 行设置 FREEZE_VELOCITY=T。
+
+## Nonuniform Initial Fields: Velocity, Temperature, Species
+
+从已建立的流场开始计算可能很有用。通常可以通过正常的重新启动功能来实现，但您可能希望在整个域中指定自己的流场。本节将讨论如何针对速度、温度和跟踪物种进行计算。
+
+字段存储在逗号分隔值（.csv）文件中。您可以选择使用 FDS 或自行创建这些文件。要使用 FDS 生成文件，请在 DUMP 行中使用 DT_UVW、DT_TMP 和 DT_SPEC 分别指定速度、温度和物种的输出时间间隔；也可以使用 RAMP_***（见第 22.1 节）。例如，如果希望每 10 分钟写入速度、温度和物种字段，请添加以下内容：
+
+```fortran
+&DUMP DT_UVW=600, DT_TMP=600, DT_SPEC=600 /
+```
+
+然后，FDS 将为每个时间 N 和网格 M 写入 CHID_uvw_tN_mM.csv 等。
+
+**Velocity format**
+
+文件格式非常简单。它们是 ASCII 格式的文件，以逗号分隔，有整数标头和双存真实数据。最上面一行显示的是结构网格范围（相对于特定网格）。关于速度，请注意原始数据值是以面为中心的，索引 1 表示面的 + 边。因此，IMIN 通常为 0，代表左侧网格边界。(打开 FDS 为您编写的文件可能最容易理解这种格式）。
+
+```fortran
+WRITE(LU_UVW) IMIN,IMAX,JMIN,JMAX,KMIN,KMAX
+DO K=KMIN,KMAX
+DO J=JMIN,JMAX
+DO I=IMIN,IMAX
+WRITE(LU_UVW,*) U(I,J,K),',',V(I,J,K),',',W(I,J,K) ! units are m/s
+ENDDO
+ENDDO
+ENDDO
+```
+
+**Temperature format**
+
+同样，对于温度来说，除了温度是一个存储在单元中心的标量外，其他都是一样的。因此，IMIN 通常为 1。注意单位是 K。
+
+```fortran
+WRITE(LU_UVW) IMIN,IMAX,JMIN,JMAX,KMIN,KMAX
+DO K=KMIN,KMAX
+DO J=JMIN,JMAX
+DO I=IMIN,IMAX
+WRITE(LU_TMP,*) TMP(I,J,K) ! units are K
+ENDDO
+ENDDO
+ENDDO
+```
+
+**Species format**
+
+跟踪的物种以逗号separed的列表形式写出，每个单元格作为文件中的一行。与温度类似，物种质量分数也是活在单元中心的标量。
+
+```fortran
+WRITE(LU_UVW) IMIN,IMAX,JMIN,JMAX,KMIN,KMAX
+DO K=KMIN,KMAX
+DO J=JMIN,JMAX
+DO I=IMIN,IMAX
+! FMT is comma-separated
+! units are mass fraction
+WRITE(LU_SPEC,FMT) ( ZZ(I,J,K,N), N=1,N_TRACKED_SPECIES )
+ENDDO
+ENDDO
+ENDDO
+```
+
+**Reading the Fields**
+
+您可以使用 CSVF 行读入 3-D 字段。只允许使用一个 CSVF 行。例如
+
+```fortran
+&CSVF UVWFILE ='my_velocity_field.csv',
+TMPFILE ='my_temperature_field.csv'
+SPECFILE='my_species_field.csv' /
+```
+
+如果涉及多个网格，请仅输入第一个 .csv 文件的名称。文件必须以 “1.csv ”结尾。FDS 将根据网格总数递增网格编号。例如，如果您有 16 个网格，可以使用
+
+```fortran
+&CSVF UVWFILE ='CHID_uvw_t1_m1.csv',
+TMPFILE ='CHID_tmp_t1_m1.csv',
+SPECFILE='CHID_spec_t1_m1.csv' /
+```
+
+例如，FDS 将按照 MESH 行的顺序读取 CHID_uvw_t1_m1.csv 至 CHID_uvw_t1_m16.csv（注意，也可以使用网格的 MULT 行）。
+
+## Gravity
+
+默认情况下，重力指向负 Z 方向，更简单地说，就是向下。不过，要改变重力方向以模拟倾斜的屋顶或隧道等，可在 MISC 行上指定重力矢量，其形式为 GVEC=0.,0.,-9.81，单位为 m/s2。这是默认值，但也可更改为任何方向。
+
+在一些特殊应用中，您可能需要改变重力矢量的时间函数或第一个空间坐标 x 的函数。例如，在太空飞船上，微小的运动会导致通常为零的重力水平发生时间变化，这种效应被称为 “重力抖动”。更常见的情况是，**在隧道火灾模拟中，有时需要改变重力方向来模拟坡度变化**。隧道的坡度可能会随着您的行进而改变；因此，您可以告诉 FDS 重力的方向。对于空间或时间上变化的重力方向和/或大小，请执行以下操作。首先，在 MISC 行中，将重力的三个分量 GVEC 设置为某种 “基本 ”状态，如 GVEC=1.,1.,1.，这样就可以灵活地改变所有三个分量。接下来，为各个分量指定 “斜坡”，即 RAMP_GX、RAMP_GY 和 RAMP_GZ，所有这些都在 MISC 行中指定。关于 RAMP 的更多讨论将在第 11 章中进行，但现在您可以将以下内容作为一个简单的模板：
+
+```fortran
+&MISC GVEC=1.,0.,1., RAMP_GX='x-ramp', RAMP_GZ='z-ramp' /
+&RAMP ID='x-ramp', X= 0., F=0.0 /
+&RAMP ID='x-ramp', X= 50., F=0.0 /
+&RAMP ID='x-ramp', X= 51., F=-0.49 /
+&RAMP ID='x-ramp', X=100., F=-0.49 /
+&RAMP ID='z-ramp', X= 0., F=-9.81 /
+&RAMP ID='z-ramp', X= 50., F=-9.81 /
+&RAMP ID='z-ramp', X= 51., F=-9.80 /
+&RAMP ID='z-ramp', X=100., F=-9.80 /
+```
+
+请注意，重力的 x 和 z 分量都是 x 的函数。**FDS 的编程只允许 x 坐标的变化。**还请注意，F 只是重力矢量分量 “基数 ”的乘数，由 GVEC 给出。这就是为什么使用数字 1 很方便--它允许您直接指定 RAMP 线上的重力分量。这些线的作用是模拟隧道的前 50 米没有坡度，但后 50 米有 5%的向上坡度。请注意，由于 5% 的斜率，重力矢量与垂直方向的夹角为 tan-1 0.05 = 2.86◦，0.49 和 9.80 分别等于重力矢量的大小 9.81 m/s2，乘以 2.86◦ 的正弦和余弦。检查一下你的计算，重力分量平方和的平方根应该等于 9.81。注意，在这种情况下，Y 方向没有计算在内，因为重力矢量没有 Y 方向的变化。要改变重力在时间上的方向和/或大小，请遵循相同的步骤，但将 RAMP 线条中的 X 替换为 T。
+
+请注意，在有喷淋装置的情况下，改变 GVEC 会改变液滴在气体中的运动方式，但不会改变液滴在固体表面的运动方式。**在固体表面上，液滴的运动方向总是向下，即负 Z 方向**。
+
+# Pressure
+
+通常情况下，您无需设置与压力泊松方程求解相关的任何参数。但是，在某些情况下可能需要更改默认数值。这可以通过 PRES 命名列表组来实现（表 23.22）。
+
+FDS 与其他 CFD 模型的一个独特之处在于，它采用了纳维-斯托克斯方程的低马赫数近似值。在低速流动模拟中，可以假定声波和压力扰动以无限快的速度传播，而不是以声速传播，在环境温度和压力下，声速约为 340 米/秒。典型的车厢火灾引起的气流速度为每秒几十米，远低于声速。然而，对于模拟 1000 米隧道内的火灾，干扰的传播时间仅为几秒钟。如果隧道一端为强制流，另一端为开口，那么风扇产生的压力脉冲需要几秒钟才能到达另一端。然而，在低马赫数情况下，脉冲会瞬间到达另一端。
+
+在 FDS 中，作为空间和时间函数的压力$p(\mathbf{x},t)$被分解为 “背景 ”部分$\bar p(z,t)$和扰动 $\tilde p(\mathbf{x},t)$。**背景压力仅是时间和垂直空间坐标 z 的函数，它考虑了大气的环境分层**。对于向大气开放的典型隔间火灾模拟，$\bar p$基本上是恒定的。**扰动压力驱动火灾诱发的流场**。
+
+$\tilde p$ 的方程是一个椭圆偏微分方程（PDE），由动量方程的散度形成，其中包含强迫项$ ∇\tilde p/\rho$。理想情况下，该 PDE 的形式为
+$$
+\nabla \cdot (\frac{1}{\rho})\nabla \tilde p=\cdot\cdot\cdot
+$$
+该 PDE 的离散形式，即其在数值网格上的近似形式，是一个线性方程组 $\mathbf{A}\mathbf{\tilde p}=\mathbf b$，其中 $\mathbf{A}$ 是一个稀疏（即大部分为零）矩阵，$\mathbf{\tilde p}$ 是一个元素数等于计算域中网格单元数的向量，$\mathbf{b}$ 是一个代表动量方程各离散项的向量。求解这个庞大的方程组所需的 CPU 和内存需求很容易使模拟的所有其他部分相形见绌。有两种方法可以解决这个问题。:exclamation:首先，在域的每个网格内求解压力场，并通过求解器的多次迭代将各个压力场 “拼接 ”在一起。其次，代表算子 $\nabla \cdot (\frac{1}{\rho})\nabla$的矩阵$\mathbf{A}$ 通过用环境值替换变量密度 $\rho(\mathbf{x}, t) $得到简化，这样矩阵 $\mathbf{A}$就不需要在每个时间步长重新计算，而且可以使用快速傅立叶变换 (FFT) 的非常快速高效的求解器。
+
+在接下来的两节中，我们将讨论泊松方程的这些简化，以及在某些应用中为提高求解精度而可能需要设置的参数。
+
+## Accuracy of the Pressure Solver
+
+对于单网格，可以使用基于 FFT 的求解器相对快速、精确地（即达到机器精度）求解压力的泊松方程的简化（即可分离）形式。然而，对于不同网格分辨率和配置的多个网格，不可能使用快速求解器对泊松方程进行全局求解。相反，快速求解器是逐个网格并行使用的，通过对各个网格的重复求解，迫使每个网格上的压力场与网格边界相匹配。要迭代全局压力解法，使其达到与局部压力解法相同的精度水平，耗时过多。全局压力解法的不准确性表现为网格边界处速度的法向分量略有不匹配。对于这种速度不匹配，规定了误差容限。这些速度法向分量的微小误差也会出现在单个网格的实体内部边界处。基于 FFT 的快速求解器只能在网格外部边界执行精确的无流动条件。
+
+如果网格界面或实体边界处的速度法向分量误差较大，可以在每个时间步长内调用压力求解器的次数超过默认值，从而减小误差。为此，请在 PRES 行中指定 VELOCITY_TOLERANCE 为实体边界上允许的最大法向速度分量或网格界面上的最大误差。单位为 m/s。如果设置了该值，请尝试使用不同的值，并监测每个时间步长所需的压力迭代次数，以达到所需的容差。默认值为 $\delta x/2$，其中 $\delta x$ 为特征网格单元大小。迭代次数将写入文件 CHID.out。如果使用的值太小，CPU 所需的时间可能会过长。每半个时间步长的最大迭代次数由 MAX_PRESSURE_ITERATIONS 确定，也在 PRES 行。默认值为 10。
+
+要验证每个网格上压力求解的准确性，请在 PRES 行中将 CHECK_POISSON 设为 T，指示 FDS 检查泊松方程的左侧和右侧是否等效（参见 FDS 技术指南 [^29]）。错误信息将打印到 CHID.out 文件中。请注意，这将验证局部而非全局压力解决方案的准确性。要检查全局压力解的精度，请参阅第 21.3 节。
+
+压力互调方案有可能看起来 “卡住”--解决方案的收敛速度可能会急剧减慢，进一步的迭代只会消耗 CPU 资源，而不会改善解决方案。您可以通过在 PRES 行设置 SUSPEND_PRESSURE_ITERATIONS=T，让 FDS 在达到最大迭代次数之前摆脱这种情况。如果误差不低于 ITERATION_SUSPEND_FACTOR（默认值为 0.95），FDS 将暂停压力迭代。
+
+### Optional Pressure Solvers
+
+FDS 中的默认泊松求解器（PRES 行上的 SOLVER='FFT'）基于名为 CrayFishpak 的线性代数例程包。不过，在某些情况下，您可能需要使用基于 Intel® MKL 稀疏簇求解器的几种替代方法之一。
+
+SOLVER=’ULMAT’ 这种求解器适用于计算域相对较小、壁较薄（即零单元厚度）的密封空腔。使用 FFT 求解器时，速度法向分量的微小误差会导致温度、密度和压力的非物理变化，最终可能导致计算在数值上不稳定。例如，假设您有空心钢柱或空心铝制薄壁管道，并希望模拟这些空间内的热渗透。
+
+​	在 ULMAT 求解器中，压力的未知值只存在于气相单元中，因此可以精确计算固体表面的速度法向分量，而不会产生渗透误差。严格来说，在这种模式下，FDS 不再使用 “沉浸边界法 ”来处理流动障碍物--压力求解现在是 “非结构化 ”的，因此其名称中出现了 U。该求解器并不保证速度的法线分量在网格边界处完全匹配，默认 “FFT ”求解器使用的迭代程序仍用于使网格界面速度法线更接近。该求解器选项允许在网格边界和域内部密封区域进行细化，必须为这些区域计算额外的矩阵。
+
+​	ULMAT 求解器会占用每个网格的大量内存。应将其使用限制在最多 150,000 个单元的网格上。这个数字取决于每个 MPI 进程的随机存取内存（RAM）容量，如果每个 MPI 进程的 RAM 容量达到数十 GB，则可以尝试使用更大的网格。
+
+SOLVER=’GLMAT’ 该求解器适用于同一细化级别的非重叠、非拉伸网格，覆盖单个相连域，即一个大矩形框。使用该求解器时，固体和气体单元中的压力均采用沉浸边界法计算，以消除流动障碍，这与默认的 “FFT ”求解器相同。该模式产生的压力解决方案与 “FFT ”求解器在单一网格域中产生的压力解决方案完全相同。也就是说，任何网格边界的速度误差都会被消除。需要注意的是，目前在模型上定义的所有气体单元都建立了单一离散矩阵，因此该求解器不适用于域内有内部密封区域的情况。
+
+​	GLMAT 求解器主要用于测试和诊断。由于求解整个计算域的压力，除非您的计算机拥有超大内存，否则它的总单元数限制在 100 万左右。
+
+SOLVER=’UGLMAT’  该求解器适用于同一细化级别的非重叠、非拉伸网格，覆盖单个相连域，即一个大矩形框。与求解器 “ULMAT ”一样，压力的未知值只存在于气相单元中，因此可以精确计算固体表面的速度法向分量（无速度穿透误差）。此外，该求解器还能确保网格边界处的速度法向分量完全匹配。这种求解器的网格单元数限制在 100 万左右，而且 (3) 在其他求解器中，它的 CPU 密度最高。
+
+由于这些替代方法基于英特尔® MKL 并行 LU 分解求解器，因此需要计算和存储全局因式分解矩阵。根据问题的大小，这些操作可能会耗费大量的 CPU 时间和内存。我们发现，在配备 64 GB 内存的多核工作站上，它可以处理多达一百万个单元的问题。
+
+<center>Table 21.1: Summary of available pressure solvers.</center>
+
+|               | Allows              | Allows       | Allows              | Allows | Handling Errors          | Handling Errors           | Handling Errors         |
+| ------------- | ------------------- | ------------ | ------------------- | ------ | ------------------------ | ------------------------- | ----------------------- |
+| Solver        | Refinement[^21.1.1] | Stretching   | Add/Remove[^21.1.2] | Zones  | Velocity @ Mesh[^21.1.3] | Velocity @ Solid[^21.1.4] | Inseparability[^21.1.5] |
+| FFT (default) | ✓                   | 2 directions | ✓                   | ✓      | iterative                | iterative                 | iterative               |
+| ULMAT         | ✓                   | ✓            | ✓                   | ✓      | iterative                | exact                     | iterative               |
+| GLMAT         | ×                   | ×            | ✓                   | ✓      | exact                    | iterative                 | iterative               |
+| UGLMAT        | ×                   | ×            | ✓                   | ✓      | exact                    | exact                     | iterative               |
+
+****
+
+[^21.1.1]:“细化 "是指允许改变相邻网格的网格分辨率。
+[^21.1.2]:“添加/删除 "是指求解器在模拟过程中处理几何体变化的能力，可以通过 CTRL 功能添加或删除 OBST 或 GEOM。
+[^21.1.3]:“网格速度“（Velocity @ Mesh）是指网格边界（即 FDS 中所谓的 ”内插 "边界）处速度法向分量的误差。对于非精确求解器，可以使用参数 VELOCITY_TOLERANCE 控制这一误差。质量守恒误差与速度容差成正比。列为 “精确 ”的求解器为全局求解器。“全局 "指的是全局矩阵求解，即整个域只有一个矩阵，而不是每个网格只有一个矩阵。因此，这种求解器没有网格边界误差。
+[^21.1.4]:“固体速度 “是指固体边界处速度法向分量的误差，即所谓的 ”穿透 "误差，这种误差存在于浸没边界法中，并导致质量守恒误差。对于严密密封的压力区，控制这些误差尤为重要。对于非精确求解器，可以使用参数 VELOCITY_TOLERANCE 控制这一误差。质量守恒误差与速度容差成正比。列为 “精确 ”的求解器为非结构化求解器。“非结构化 "意味着固体边界（如 OBST 边界）被视为压力泊松方程的域边界。非结构求解器与沉浸边界法正好相反。
+[^21.1.5]:“不可分割性 "是指与不可分割泊松方程的解法相比，由于压力在气压项中滞后而产生的误差。可以使用参数 PRESSURE_TOLERANCE 来控制这一误差。
+
+### Example Case: Pressure_Solver/duct_flow
+
+为了演示如何提高压力求解器的精度，请考虑空气流经一个穿过多个网格的正方形管道的情况。在样本输入文件 duct_flow.fds 中，空气以 1 米/秒的速度通过 1 平方米的管道。在没有热膨胀的情况下，流入管道的体积流量应等于流出管道的体积流量。图 21.1 显示了计算得出的流入量和流出量与时间和所需压力迭代次数的函数关系。默认压力求解策略采用分块直接 FFT 求解，并结合直接强迫沉浸边界法来模拟流动障碍。因此，压力误差有两个来源：一个在网格界面，一个在实体边界。默认的压力迭代方案试图将这两个误差源的速度误差控制在指定（或默认）的速度容差范围内。在 duct_flow 案例中，VELOCITY_TOLERANCE 设置为 0.001 m/s，MAX_PRESSURE_ITERATIONS 设置为 1000，网格单元大小为 0.2 m。对于默认方案（FFT + IBM），由于实体和网格边界的误差，流出量与流入量并不完全一致。我们还包含了使用非结构化压力矩阵的 “UGLMAT ”求解器得出的结果，该求解器允许流动求解器在固体边界强制执行不渗透条件（速度的法向分量为零）。
+
+```fortran
+&PRES SOLVER='UGLMAT' /
+```
+
+如图 21.1 所示，体积流完全匹配，所需的压力迭代次数为一次。这种压力求解策略是否最有效取决于问题和所需的误差容限。在本例中，“UGLMAT ”比默认的 FFT 运行速度快约 25%，而且更加精确。原因是指定了严格的误差容限，FFT 求解器被迫在每个时间步迭代数十或数百次。在默认误差容限下运行时，“FFT ”求解器比其他求解器速度更快，但精度较低。
+
+![image-20241223105404456](./../FUG6.9.1翻译.assets/image-20241223105404456.png)
+
+### Example Case: Pressure_Solver/dancing_eddies
+
+在这个例子中，空气以 0.5 米/秒的速度通过一个 30 厘米长的二维通道。与气流相向的板状障碍物形成了卡曼涡街。计算域分为 4 个网格。共进行了三次模拟：一次将 VELOCITY_TOLERANCE 设置为默认值，一次将其设置为相对较小的值，一次使用 SOLVER='UGLMAT'。图 21.2 显示了这些情况下的下游压力历史记录，并与只使用一个网格的模拟结果进行了比较。公差较小的情况与单一网格解法的匹配度较高，但计算成本较高，约为 2.5 倍。SOLVER='UGLMAT'的计算时间比默认情况下略长 1.25 倍，但误差为机器精度。这些情况使用 MPI 进行域分解，但只使用了一个 OpenMP 线程。不过请注意，“UGLMAT ”求解器是线程化的，而目前的 “FFT ”求解器（FDS 默认）不是。
+
+![image-20241223105526436](./../FUG6.9.1翻译.assets/image-20241223105526436.png)
+
+名为 dancing_eddies_tight 的情况在没有使用特殊压力预处理的情况下重新运行。图 21.3 显示了压力迭代次数（左）和 CPU 时间（右）的减少情况。
+
+![image-20241223105600896](./../FUG6.9.1翻译.assets/image-20241223105600896.png)
+
+### Example Case: Random Obstructions
+
+在这个例子中，许多不同类型的障碍物被随机放置在一个分成 16 个网格的域中。其中一些障碍物会在特定时间产生或移除。添加热源可使气体移动。网格单元大小为 0.025 米，默认正常速度误差容限为 0.025 米的一半。图 21.4 显示了压力求解器的最大误差和迭代次数。迭代次数的峰值与障碍物的产生或清除相对应。当流场发生突然变化时，需要更多的迭代次数来降低误差。
+
+![image-20241223105655593](./../FUG6.9.1翻译.assets/image-20241223105655593.png)
+
+## Baroclinic Vorticity
+
+求解压力泊松方程的第二个难题是，离散化时形成的线性方程组矩阵不具有恒定系数，因为密度 $\rho(\mathbf{x},t)$会随着每个新的时间步长发生变化。为了解决这个问题，动量方程中的压力项分解如下：
+$$
+\frac{1}{\rho}\nabla\tilde{p}=\nabla\left(\frac{\tilde{p}}{\rho}\right)-\tilde{p}\nabla\left(\frac{1}{\rho}\right)
+$$
+从而得到一个可以高效求解的泊松方程：
+$$
+\nabla^2\left(\frac{\tilde{p}^{n,k}}{\rho^n}\right)=\nabla\cdot\tilde{p}^{n,k-1}\nabla\left(\frac{1}{\rho^n}\right)+\cdots\label{21.3}\tag{21.3}
+$$
+上标 n 代表时间步长。上标 k 表示该方程在每个时间步长内多次求解，k 表示迭代次数。每迭代一次，新旧$\tilde p$ 值就会靠拢一次。继续迭代[^21-1]直到误差项的最大值
+$$
+\varepsilon^k=\max_{ijk}\left|\nabla\cdot\left(\frac{1}{\left|\overline{p^n}\right.}\right)\nabla\tilde{p}^{n,k}-\nabla^2\left(\frac{\tilde{p}^{n,k}}{\rho^n}\right)+\nabla\cdot\tilde{p}^{n,k-1}\nabla\left(\frac{1}{\rho^n}\right)\right|\label{21.4}\tag{21.4}
+$$
+低于 PRES 行指定的 PRESSURE_TOLERANCE 值。其默认值为 $20/\delta x^2 s^{-2}$，其中 $\delta x$是网格单元的特征尺寸。
+
+式 $\eqref{21.3}$右侧的滞后压力项有时称为baroclinic torque，由于压力梯度和密度梯度的不对齐而产生涡度。在 FDS 6 之前的版本中，发现包含条纹力矩项有时会导致数值不稳定。如果怀疑是这个项导致了数值问题，可以通过在 MISC 行中设置 BAROCLINIC=F 将其删除。例如，在下面的简单氦烟羽测试案例中，忽略条带力矩会明显改变膨化行为。但在其他应用中，其影响并不明显。有关其影响的进一步讨论，请参阅参考文献 [^65]。
+
+**Example Case: Flowfields/helium_2d_isothermal**
+
+本例演示了对轴对称氦羽流进行气压校正的方法。请注意，在 FDS 中求解的控制方程是根据三维笛卡尔坐标系编写的。然而，通过将 y 方向的单元数设为 1，可以进行二维笛卡尔或二维圆柱（轴对称）计算。轴对称氦烟羽的示例如图 21.5 所示。
+
+![image-20241223110354160](./../FUG6.9.1翻译.assets/image-20241223110354160.png)
+
+## Pressure Considerations in Long Tunnels
+
+FDS 的一个常见应用是隧道火灾，但在由多个网格组成的相对狭长的隧道中模拟火灾时，压力场可能会出现虚假波动，从而导致数值不稳定。如果在涉及隧道的模拟中出现数值不稳定性，您可以尝试以下补救措施，这些措施按有效性顺序排列在此：
+
+1. 如果(1) 隧道是由多个端对端相邻的网格组成；(2) 隧道外没有其他网格；(3) 隧道顶部、底部或侧面没有 OPEN 边界；(4) MPI 进程数等于网格数；请在 PRES 行设置 TUNNEL_PRECONDITIONER=T。该选项指示 FDS 求解横跨整个隧道的一维压力方程。这个一维解可以看作是一个平均压力场，它被添加到使用默认的基于 FFT 的求解器在每个网格上求解的三维压力场中。一维全局求解加速了整个域上整体三维压力场的收敛。
+2. 在大多数情况下，MAX_PRESSURE_ITERATIONS 的默认值为 10；当调用 TUNNEL_PRECONDITIONER 时，默认值为 20。如果在隧道场景中遇到数值不稳定性，请尝试将 MAX_PRESSURE_ITERATIONS 设置为 50，并监控 CHID.out 文件中每个时间步的压力迭代次数。
+3. 如果使用多个网格，请减小 PRES 行的 VELOCITY_TOLERANCE 值，使网格边界的速度更加匹配。VELOCITY_TOLERANCE 的默认值（单位为 m/s）为 $\delta x/2$。如果设置 TUNNEL_PRECONDITIONER=T，就不太需要降低 VELOCITY_TOLERANCE 的默认值，但仍有必要增加 MAX_PRESSURE_ITERATIONS 以应对偶尔出现的压力偏移。
+4. 在隧道沿线靠近地面或地面的不同位置创建 OPEN 通风口。这可以模拟隧道内的自然泄漏，并在一定程度上缓解压力的剧烈波动。需要注意的是，即使压力方程在整个域内得到完美求解，低马赫数假设仍会导致虚构的巨大压力波动。开放边界可以帮助缓解这些压力波动。如果选择沿隧道长度创建 OPEN 边界，则不应将 TUNNEL_PRECONDITIONER 设置为 T
+5. 降低 PRES 行的 PRESSURE_TOLERANCE 值，以减少新旧压力场之间的不匹配。默认值为 $20/\delta x^2 s^{-2}$。一个不错的尝试值是默认值的 1/5 至 1/10。
+6. 在 PRES 行设置 SOLVER='GLMAT'，以严格执行网格边界处的法向速度和压力匹配，或设置'UGLMAT'，以执行'GLMAT'的功能，并在实体障碍物处执行零法向速度。如果使用这些求解器，则无需设置上述各种公差或使用 TUNNEL_PRECONDITIONER。不过，这些求解器非常昂贵，因此最好先尝试一个简单的案例，以确定压力求解器消耗的 CPU 时间。
+
+两个简单的测试用例 Pressure_Solver/tunnel_demo.fds 和 tunnel_demo_glmat.fds 演示了本节讨论的一些问题。第一个案例使用基于 FFT 的默认压力求解器，并将 TUNNEL_PRECONDITIONER 设为 T；第二个案例使用 “GLMAT ”求解器。8MWfire 位于一个 4 米 x 4 米 x 128 米长的隧道中，隧道倾斜 10◦，下端封闭，上端开放。隧道被划分为 8 个网格，网格大小相同，网格均匀度为 20 厘米。案例运行时间相对较短，并打印出包含速度和压力误差信息的诊断文件[^21-2]。这些文件通过在 DUMP 行设置 VELOCITY_ERROR_FILE=T 生成。文件名分别为 tunnel_demo_pressit.csv 和 tunnel_demo_glmat_pressit.csv。各列说明如下：
+
+Time: 模拟时间（s）
+
+Time Step: 时间步的索引
+
+Iteration: 时间步长内压力迭代的索引。请注意，对于一个时间步长，有两个压力迭代系列，一个用于预测器阶段，另一个用于校正器阶段。
+
+Total: 整个模拟过程中压力迭代的累积指数
+
+Mesh: **出现最大速度误差的网格**
+
+I,J,K: **出现最大速度误差的单元指数**
+
+Velocity Error: 网格界面或实体内部边界法向速度分量之差的最大绝对值
+
+Mesh,I,J,K: 出现最大压力误差的网格和单元指数
+
+Pressure Error: 公式$\eqref{21.4}$中以 $s^{-2}$ 为单位的量
+
+图 21.6 显示了两种情况下短时间内的模拟速度和压力误差。对于每个量，都有一个默认误差容限，是否达到该容限取决于是否已达到 MAX_PRESSURE_ITERATIONS（默认值 10），或误差是否比前一次迭代至少减少 25%。在某些情况下，误差会缓慢减小，添加这些标准是为了避免迭代次数过多而导致精度几乎没有提高。图 21.6 中显示的误差相对较大，这是因为在隧道等封闭的长围护结构中发生火灾时会产生较大的压力波动，这对上文讨论的多网格能力和压力求解算法都提出了挑战。请注意，在这种情况下，使用 “GLMAT ”求解器进行的模拟没有速度误差，因为它是在整个域上直接求解泊松方程，而不是逐个网格求解。不过，这种模拟仍然需要对压力求解器进行迭代，以使解法更接近不可分割泊松方程的真实解法。
+
+![image-20241223111335150](./../FUG6.9.1翻译.assets/image-20241223111335150.png)
+
+**Special Case: Pressure Drop in Long Tunnels**
+
+本节将介绍一组案例，用于从 FDS 模拟的长隧道流（Validation/Moody_Chart/FDS_Input_Files/tunnel_pressure_drop 系列）中提取隐含摩擦因数。请注意，《FDS 验证指南》[^38] 中提供了更完整的穆迪图表映射，但该序列使用平均压力梯度来强制流动，而这并非典型的用户情况。这里的气流是由通风口强制产生的，轴向压力剖面是由平面平均 DEVC 形成的。隧道长 1.6 公里（约 1 英里），案例 A、B、C 和 D 的横截面为 10 米乘 10 米的正方形。情况 E 的横截面宽度为 12.8 米，高度为 5 米，水力直径为 7.2 米。空气以 2、4 或 10 米/秒的速度从入口处进入，砂粒粗糙度高度分别为 0.0001、0.01 或 0.1 米。流向网格分辨率是壁面法线分辨率的两倍。表 21.2 列出了情况矩阵和摩擦因数结果。目标摩擦因数取自 Colebrook 方程[^66]。表 21.2 还显示了 10 和 20 垂直单元情况下的 FDS 结果，以及与 Colebrook 值相比的最大相对误差。压力曲线如图 21.7 所示。
+
+<center>Table 21.2: Friction factors for tunnel_pressure_drop cases.</center>
+
+| Case | Velocity (m/s) | Roughness (m) | Hydraulic Dia. (m) | f Colebrook | f FDS 10 | f FDS 20 | Max Rel. Error (%) |
+| ---- | -------------- | ------------- | ------------------ | ----------- | -------- | -------- | ------------------ |
+| A    | 2              | 0.0001        | 10                 | 0.0114      | 0.0125   | 0.0117   | 10                 |
+| B    | 2              | 0.1           | 10                 | 0.0379      | 0.0363   | 0.0347   | 8.6                |
+| C    | 10             | 0.0001        | 10                 | 0.00932     | 0.00914  | 0.00909  | 2.4                |
+| D    | 10             | 0.1           | 10                 | 0.0379      | 0.0355   | 0.035    | 7.6                |
+| E    | 4              | 0.01          | 7.2                | 0.0214      | 0.0195   | 0.0204   | 9                  |
+
+![image-20241223112055429](./../FUG6.9.1翻译.assets/image-20241223112055429.png)
+
+虽然合理的网格分辨率很重要，但 FDS 中的壁面模型即使在分辨率相当粗糙的情况下也能给出正确的平均壁面应力。例如，10 个单元的情况 C 的 y+ 实际上是 5000（这是第一个网格单元的中间位置除以粗糙度高度）。另外请注意，这里使用 0.1 毫米的粗糙度只是为了测试代码的完整性。虽然这确实是文献中的混凝土粗糙度值，但现实世界中的隧道墙壁可能存在网格无法解决的几何特征，这些特征也可能成为粗糙度元素。在 FDS 中指定粗糙度时应考虑这些元素。
+
+图 21.7 的右下图显示了隧道 B（流速 2 米/秒，壁面粗糙度 0.1 米）中的压降，隧道 B 的中点现在包含一个假设的 50MW 火。图例中列出了垂直方向的网格分辨率。在这种情况下，沿隧道中心线的中点高度评估压力。隧道开放端（x = 1600 米）的压力下降相对较快，这是因为假设开放边界处的压力为环境压力。
+
+## Pressure Considerations in Stairwells
+
+另一种常见的防火应用是楼梯间内的烟雾移动和增压。楼梯间可以看作是一个垂直隧道，存在与压力求解器相关的类似问题。与隧道不同的是，没有特殊的算法来提高楼梯间内模拟的准确性和稳定性，但您可以采取一些措施来改进模拟：
+
+1. 与任何高层建筑一样，大气的压力分层会对流场和通风产生影响。ABSOLUTE PRESSURE"是建筑模拟中一个有用的输出量。这将显示背景压力场以及由通风变化或火灾引起的相对较小的扰动。在调用输出量 “压力”（PRESSURE）时，通常看不到背景压力场，因为输出量只显示对 背景压力场的扰动。
+2. 在模拟楼梯间场景时，可能有必要收紧压力求解器的容差。如果使用多个网格，请减小 PRES 行的 VELOCITY_TOLERANCE 值，以强制网格边界的速度更紧密地匹配。VELOCITY_TOLERANCE 的默认值（单位为 m/s）为 $\delta x/2$。将 MAX_PRESSURE_ITERATIONS 增加到默认值 10 以上。在 PRES 行选择 SOLVER='GLMAT'，以严格执行网格边界处的法向速度和压力匹配；或选择'UGLMAT'，以执行'GLMAT'的功能，并在实体障碍物处执行零法向速度。如果使用这些求解器，则无需设置上述各种公差，但请注意这些求解器的成本可能很高。请先尝试一个简单的案例，以确定压力求解器需要消耗多少 CPU 时间。
+
+名为 Pressure_Solver/stairwell.fds 的示例输入文件展示了本章讨论的一些重要问题。该案例包括一个通向大厅的 18 层楼梯井。门位于不同的位置，并被设定为在压差超过 20 Pa 时打开。楼梯井顶部一个 1 米乘 1 米的舱口以 0.5 立方米/秒的速度将空气抽出，触发门一个接一个地打开，直到在大厅打开的门和抽风口之间开辟出一条通道。图 21.8 中的曲线表明，一旦通道打开，流量就会平衡到 0.5 立方米/秒。
+
+![image-20241223112412346](./../FUG6.9.1翻译.assets/image-20241223112412346.png)
+
+![image-20241223112432345](./../FUG6.9.1翻译.assets/image-20241223112432345.png)
 
 
 
 ****
 
-[^18-1]:请注意，将遮蔽率从 %/ft 单位转换为 %/m 单位的公式如下：$O[\%/\mathfrak{m}]=\left[1-\left(1-\frac{O[\%/\mathfrak{ft}]}{100}\right)^{3.28}\right]\times100$
+[^21-1]:请记住，压力方程的迭代一直持续到满足三个条件为止。第一个标准涉及压力项的分解，第二个标准涉及固体内部表面的速度法向分量，第三个标准涉及网格界面上的速度法向分量不匹配。
+[^21-2]:注意：速度误差文件可能相当大。仅用于相对较短的模拟。
+
+# Output
+
+FDS 有各种类型的输出文件，用于存储计算数据。其中一些文件为二进制格式，可由 Smokeview 读取和渲染。有些文件只是逗号分隔的文本文件。在大多数情况下，您必须明确声明要输出的数据。输入文件中通常有相当大的篇幅用于输出声明。
+
+- 要控制数据输出频率，请参见第 22.1 节。
+- 要记录指定点或指定体积内的数据，请参见第 22.2 节。
+- 要记录实体边界内的数据，请参见第 22.3 节。
+- 要可视化标量或矢量的平面轮廓，请参见第 22.4 节。
+- 要直观了解固体表面量，请参见第 22.5 节。
+- 要查看气相量的三维等值线，请参见第 22.6 节。
+- 要可视化整个域的各种标量，请参见第 22.7 节。
+- 要想象逼真的烟雾和火焰，请参见第 22.8 节。
+- 要观察颗粒和液滴，请参见第 22.9 节。
+- 有关特定输出特性的更多信息，请参见第 22.10 节。
+- 从等高线和边界输出文件中提取数据的工具见第 22.11 节。
+- 气相输出量列表见第 22.12 节。
+- 固相输出量列表见第 22.13 节。
+- 与设备相关的输出量列表见第 22.14 节。
+- 粒子和液滴输出量列表见第 22.15 节。
+- 暖通空调输出量列表见第 22.16 节。
+
+命名列表组 DUMP 包含控制输出文件写入速度的参数（表 23.8）以及与输出文件相关的其他各种全局参数。输入文件中只能有一行 DUMP。默认情况下，FDS 将所有结果文件输出到当前工作目录。用户可以通过在 DUMP 行设置 RESULTS_DIR 来为二进制文件指定单独的输出目录。
+
+## Controlling the Frequency of Output
+
+点设备数据、切片（等值线）数据、颗粒数据、等值面数据、三维烟雾数据、边界数据、固相剖面数据和控制功能数据每 (T_END-T_BEGIN)/NFRAMES 秒写入文件一次，除非使用表 22.1 中列出的参数另行指定。这些参数写入 DUMP 行。您也可以将 NFRAMES 设置为默认值 1000 以外的值。名为 DT_XXXX 的参数指定了数据转储之间的统一时间间隔。参数 RAMP_XXXX 允许您精确指定要写出的时间。例如，如果要在 10 秒、20 秒和 60 秒时写入边界文件，请添加以下内容：
+
+```fortran
+&DUMP ..., RAMP_BNDF='b-ramp' /
+&RAMP ID='b-ramp', T=10 /
+&RAMP ID='b-ramp', T=20 /
+&RAMP ID='b-ramp', T=60 /
+```
+
+有几点需要注意：
+
+SMOKE3D 如果模拟涉及燃烧，FDS 会自动写出烟尘密度、单位体积热释放率和温度的 Smoke3D 文件。这些数据将在 Smokeview 中渲染为逼真的烟雾和火焰。要关闭此功能，请在 DUMP 行中设置 SMOKE3D=F。
+
+DT_PL3D Plot3D 文件输出之间的时间间隔。请注意，FDS 6 之前的版本默认输出 Plot3D 文件。现在，您必须使用此参数指定输出时间间隔。默认值为 1000000 秒，这意味着除非指定，否则不会输出 Plot3D 文件。
+
+FLUSH_FILE_BUFFERS FDS 会定期清除输出文件缓冲区，并强制将数据写入相应的输出文件。这样做是为了在运行时更容易在 Smokeview 中查看案例。我们注意到，在 Windows 机器上偶尔会出现运行时错误，原因是与缓冲区冲洗有关的文件访问问题。如果出现这种情况，请将该参数设置为 F，但要注意，在计算完成之前可能无法在 Smokeview 中查看输出。您还可以设置 DT_FLUSH 来控制文件刷新的频率。其默认值为模拟持续时间除以 NFRAMES。
+
+STATUS_FILES 如果为 T，将生成一个输出文件 CHID.notready，如果模拟成功完成，该文件将被删除。该文件可用作错误指示器。默认为 F。
+
+<center>Table 22.1: Parameters that control the frequency of output.</center>
+
+![image-20241223113206248](./../FUG6.9.1翻译.assets/image-20241223113206248.png)
+
+## Device Output: The DEVC Namelist Group
+
+每个设备 (DEVC) 都会记录特定的QUANTITY。通常，该QUANTITY会被写入一个后缀名为 _devc.csv 的命令分隔电子表格文件中。表 22.4 至表 22.8 列出了这些QUANTITY。
+DEVC 输出有两种类型。第一种是给定QUANTITY在模拟过程中的时间历史。第二种是由点设备线性阵列组成的时间平均剖面图。下面将分别进行说明。
+
+### Gas Phase Quantity at a Single Point
+
+如果只想记录时间历史，例如气体中某一点的温度，可以添加类似的一行：
+
+```fortran
+&DEVC XYZ=6.7,2.9,2.1, QUANTITY='TEMPERATURE', ID='T-1' /
+```
+
+并在输出文件 CHID_devc.csv 中添加一列，标签为 “T-1”。FDS 会报告包含 XYZ 点的单元格中的QUANTITY值。大多数标量（如温度）都定义在单元格中心，并表示整个单元格的平均值。如果指定的坐标 XYZ 使设备位于单元边界，即两个单元中心的中间，FDS 会选择坐标值较大的那个。FDS 不会对最近的 8 个单元格中心进行加权平均。原因是其中一些小区中心可能位于薄障碍物的另一侧。
+
+如果QUANTITY是在单元面上定义的，如 “U-VELOCITY”，FDS 会选择最近的单元面并报告相应的值。
+
+### Solid Phase Quantity at a Single Point
+
+在开具固相量处方时，一定要将设备置于固体表面。由于网格并不总是与输入的障碍物位置对齐，因此固体表面的位置并不总是很明显。为了帮助定位适当的表面，在指定固相量时必须包含参数 IOR，除非使用第 22.2.3 节中描述的空间 统计选项，在这种情况下输出量与表面上的单点无关。如果固体表面的方向为正 x 方向，则设置 IOR=1。如果是负 x 方向，则设置 IOR=-1，y 和 z 方向也是如此。例如，直线
+
+```fortran
+&DEVC XYZ=0.7,0.9,2.1, QUANTITY='WALL TEMPERATURE', IOR=-2, ID='...' /
+```
+
+表示面向负 y 方向墙壁的表面温度。在某些情况下，FDS 无法确定指定的是哪个实体表面，此时诊断输出文件中会出现错误信息。重新定位设备并再试一次。最好通过实数三元组 XYZ 定位设备，使设备位置位于实体表面或实体表面以外的单元宽度内。FDS 的搜索算法将沿着与 IOR 所指示方向相反的方向寻找最近的实体表面。
+
+**Solid Phase Quantity In-Depth**
+
+:exclamation:要记录表面内部的温度，可以使用以下设备：
+
+```fortran
+&DEVC XYZ=..., QUANTITY='INSIDE WALL TEMPERATURE', DEPTH=0.005, ID='Temp_1', IOR=3 /
+```
+
+参数 DEPTH（米）表示固体表面内部的距离。如果 DEPTH 为正值，FDS 将输出从表面正面移动 DEPTH 所得到的壁节点处的温度。如果为负值，则从后表面测量（例如，从当前实体表面厚度 + DEPTH 给出的前表面位置）。请注意，如果由于固相反应导致壁厚随时间逐渐减小，而距离是从当前前表面开始测量的，则测量点将向固体背面移动。最终，测量点可能会脱离固体，在这种情况下，测量点开始显示环境温度。此时，从背面测量距离更能达到目的。
+
+请注意，“深度”（DEPTH）与 “内壁温度”（INSIDE WALL TEMPERATURE）输出的固相单元温度对应的中心离散空间位置可能并不完全一致。由于固相例程会进行拉伸和重新混合，因此很难手工计算局部离散单元的位置。如果需要离散固胞中心位置，可以通过以下方式输出
+
+```fortran
+&DEVC XYZ=..., QUANTITY='INSIDE WALL DEPTH', DEPTH=0.005, ID='XC_1', IOR=3 /
+```
+
+输出结果应位于指定深度的半个实心网格单元距离之内。
+要记录材料成分随时间变化的密度，可按以下方式使用输出量 “SOLID DENSITY（固体密度）”：
+
+```fortran
+&DEVC ID='...', XYZ=..., IOR=3, QUANTITY='SOLID DENSITY', MATL_ID='wood', DEPTH=0.001
+/
+```
+
+这样就在 MATL 行上生成了被称为 “wood ”的材料密度的时间历史记录。密度记录在正 Z 方向表面下 1 毫米处。请注意，如果 “wood ”是混合物的一部分，则密度代表混合物单位体积内 “wood ”的质量。如果没有 MATL_ID，将给出总密度。
+
+要记录固体电导率（W/(mK)），请使用 QUANTITY=“SOLID CONDUCTIVITY”。要记录固体比热（kJ/(kgK)），请使用 QUANTITY='SOLID SPECIFIC HEAT'。要记录固体热焓（kJ/m3），请使用 QUANTITY='SOLID ENTHALPY'。这些量可以使用可选的 MATL_ID 关键字。要记录固体中某种材料的质量分数，请使用 QUANTITY='SOLID MASS FRACTION'（固体质量分数），它需要一个 MATL_ID。
+
+请注意，这些数量只能作为 DEVC 或 PROF 输出，而不能作为 BNDF 输出。
+
+**Back Surface Temperature**
+
+如果只想知道 “墙 ”背面的温度，那么使用
+
+```fortran
+&DEVC XYZ=..., QUANTITY='BACK WALL TEMPERATURE', ID='Temp_b', IOR=3 /
+```
+
+请注意，只有当 “墙 ”的正面或外露表面在定义它的 SURF 线上具有 BACKING='EXPOSED' 属性时，这个量才有意义。坐标 XYZ 和方向 IOR 指的是前表面。要检查热传导计算是否正确，可以增加一行
+
+```fortran
+&DEVC XYZ=..., QUANTITY='WALL TEMPERATURE', ID='Temp_f', IOR=-3 /
+```
+
+其中 XYZ 和 IOR 指的是墙背面的坐标和方向。这两面墙的温度应该相同。请记住，在这种情况下，“壁 ”最多只能有一个网格单元厚，其THICKNESS不必与网格单元宽度相同。**相反，THICKNESS应该是 “壁 ”的实际厚度，FDS 通过它进行一维热传导计算**。
+
+### Spatially-Integrated Outputs
+
+设备 (DEVC) 的一个有用功能是指定输出量和所需统计量。例如
+
+```fortran
+&DEVC XB=..., QUANTITY='TEMPERATURE', ID='maxT', SPATIAL_STATISTIC='MAX' /
+```
+
+会导致 FDS 写出 XB 所界体积内的最高气相温度。下文将讨论其他 SPATIAL_STATISTIC。有些适用于气相输出量，有些适用于固相输出量，有些则两者都适用。请注意，如果 XB 用于没有 SPATIAL_STATISTIC 的点设备，那么 FDS 将把 XYZ 定义为 XB 所定义体积的中心。SPATIAL_STATISTIC 只能用于表 22.12 中文件类型栏中同时包含 D 和 S 的气相QUANTITY，或表 22.13 中文件类型栏中同时包含 D 和 B 的固相QUANTITY。
+
+对于热通量和表面温度等固相输出量，SURF_ID 和相应统计量的指定将计算限制在这些表面上。您可以使用坐标 XB 的六元组进一步限制搜索范围，迫使 FDS 只计算给定体积内表面单元的统计量。请注意，实体表面可能会移动以适应底层数值网格。请注意，在使用空间统计时，您不需要（也不应该）通过参数 IOR 指定方向。IOR 仅用于查找实体表面上的特定点。
+
+请注意，在 DEVC 行指定六个 XB 值的快捷方式是使用 DB='WHOLE DOMAIN'（DB 代表 “域边界”）。
+
+**Linearly Interpolated Value**
+
+默认情况下，FDS 报告的给定 XYZ 点的气相QUANTITY是在包含该点的单元格中心计算得出的值。但在某些情况下，您可能希望报告最近八个网格单元的线性插值：
+
+```fortran
+&DEVC XYZ=..., QUANTITY='TEMPERATURE', ID='T', SPATIAL_STATISTIC='INTERPOLATION' /
+```
+
+在较薄的障碍物或楼梯障碍物附近使用该选项时要小心，因为平均值可能包括障碍物对面的数据。一个明显的例子就是位于楼梯天花板下的喷淋 “装置”。
+
+**Minimum or Maximum Value**
+
+对于定义在气相或固相单元中心的标量 $\phi_{ijk}$，将 SPATIAL_STATISTIC 设置为 “MIN ”或 “MAX”，分别计算以 XB 为边界的指定体积内单元的最小值或最大值：
+$$
+\min_{ijk}\phi_{ijk}\quad;\quad\max_{ijk}\phi_{ijk}
+$$
+还需注意的是，您必须通过坐标参数 XB 指定要求和的体积，它可以扩展到多个网格。
+
+如果想知道在指定容积 XB 上指定QUANTITY的最小值或最大值，请将 SPATIAL_STATISTIC 设置为 “MINLOC X ”或 “MAXLOC X”。如果需要 Y 或 Z 坐标（单位：米），请用 Y 或 Z 代替。
+
+**Average Value**
+
+对于定义在每个网格单元中心的气相标量$\phi_{ijk}$，SPATIAL_STATISTIC “MEAN ”计算平均值
+$$
+\frac{1}{N}\sum_{ijk}\phi_{ijk}
+$$
+的单元格的统计量。请注意，该统计量仅适用于气相量。还需注意的是，您必须通过坐标参数 XB 指定要求和的体积，XB 可以扩展到多个网格。
+
+如果您对某一平面上的平均值感兴趣，可以在平面位置的两侧给 XB 体积增加一个小厚度，该平面包含所关注值的存储位置。例如，温度等标量位于单元格中心，因此将平面定位在单元格中心，并在该平面两侧添加一个小的 XB 三角形。
+
+**Volume-Weighted Mean**
+
+对于气相标量$\phi (x,y,z)$，SPATIAL_STATISTIC='VOLUME MEAN'生成的离散模拟值为
+$$
+\frac{1}{V}\iiint\phi\left(x,y,z\right)\mathrm{~d}x\mathrm{~d}y\mathrm{~d}z
+$$
+与 “MEAN ”非常相似，但它会根据网格单元的相对大小对数值进行加权。请注意，该统计量仅适用于气相量。还需注意的是，您必须通过坐标参数 XB 指定要求和的体积，它可以扩展到多个网格。
+
+**Mass-Weighted Mean**
+
+对于气相标量$\phi (x,y,z)$，SPATIAL_STATISTIC='MASS MEAN'生成的离散模拟值为
+$$
+\frac{\iiint\rho\left(x,y,z\right)\phi\left(x,y,z\right)\mathrm{~d}x\mathrm{~d}y\mathrm{~d}z}{\iiint\rho\mathrm{~d}x\mathrm{~d}y\mathrm{~d}z}
+$$
+类似于 “VOLUME MEAN”，但它会根据网格单元的相对质量对数值进行加权。请注意，该统计量仅适用于气相量。还需注意的是，您必须通过坐标参数 XB（可扩展到多个网格）指定求和的体积。
+
+**Centroids**
+
+对于气相标量$\phi (x,y,z)$，SPATIAL_STATISTIC='CENTROID X'会产生离散的类似于
+$$
+\frac{\iiint x\phi\left(x,y,z\right)\mathrm{~d}x\mathrm{~d}y\mathrm{~d}z}{\iiint\phi\left(x,y,z\right)\mathrm{~d}x\mathrm{~d}y\mathrm{~d}z}
+$$
+对 “CENTROID Y ”和 “CENTROID Z ”进行类似计算。请注意，该统计量仅适用于气相量，您必须通过坐标参数 XB 指定求和的体积。
+
+**Volume Integral**
+
+对于气相标量$\phi (x,y,z)$，SPATIAL_STATISTIC='VOLUME INTEGRAL' 生成的离散模拟量为
+$$
+\iiint\phi\left(x,y,z\right)\mathrm{d}x\mathrm{d}y\mathrm{d}z
+$$
+该统计量仅适用于气相量，尤其是单位为 $m^{-3}$ 的气相量。例如，单位体积的热释放率就是一个合适的输出量。该统计量也可用于输出量为 “DENSITY ”的 DEVC 行，以输出 XB 所限体积内的总质量。在任何情况下，您都必须通过坐标参数 XB 指定要求和的体积，XB 可以扩展到多个网格。
+
+**Mass Integral**
+
+对于给定的气相输出量$\phi (x,y,z)$，SPATIAL_STATISTIC='MASS INTEGRAL'会产生离散模拟量，即
+$$
+\iiint\rho\left(x,y,z\right)\phi\left(x,y,z\right)\mathrm{~d}x\mathrm{~d}y\mathrm{~d}z
+$$
+请注意，该统计量仅适用于气相量。还需注意的是，您必须通过坐标参数 XB 指定求和的体积，该体积可以扩展到多个网格。
+
+**Area Integral**
+
+对于气相标量$\phi (x,y,z)$，SPATIAL_STATISTIC='AREA INTEGRAL' 生成的离散模拟值为
+$$
+\int\phi\left(x,y,z\right)\mathrm{d}A
+$$
+其中 dA 取决于您为 XB 指定的坐标。请注意，该统计量仅适用于气相量，尤其是单位为 m-2 的气相量。例如，如果您想知道您命名为 “my gas”的气体种类通过 X 方向法线区域的质量通量，那么 “MASS FLUX X ”量和 SPEC_ID='my gas'量就是一个合适的输出量。另外请注意，您必须通过坐标参数 XB 指定一个求和区域，该区域可以扩展到多个网格。
+
+**Area**
+
+该功能通常与上述 SPATIAL_STATISTIC='AREA INTEGRAL'（使用两个独立的 DEVC 行，每个 DEVC 行的QUANTITY相同）一起使用。在进行精确的质量和能量平衡时，准确了解相关的VENT或SURF是非常有用的。请注意，由于笛卡尔几何图形的网格捕捉或用于表示曲线几何图形的近似值，这可能与输入文 件中的指定值略有不同。使用 SPATIAL_STATISTIC='AREA'会产生离散模拟的
+$$
+\int\mathrm{d}A
+$$
+其中 dA 取决于为 XB 指定的坐标。要计算实体的表面积，请使用 “SURFACE AREA（表面积）”，见下文。
+
+**Surface Integral**
+
+对于固相标量 $\phi$，SPATIAL_STATISTIC='SURFACE INTEGRAL'可生成离散模拟量
+$$
+\int\phi\mathrm{~d}A
+$$
+请注意，该统计量仅适用于固相量，尤其是单位为 m-2 的固相量。例如，各种热通量和质量通量都是合适的输出量。
+
+**Surface Area**
+
+AREA “的实体表面类似物是 ”SURFACE AREA"。例如，知道这个值有助于重建表面的平均通量。在 DEVC 行中提供一个包含相关表面的 XB，使用任意QUANTITY并指定一个 SURF_ID。
+
+```fortran
+&DEVC XB=..., QUANTITY=..., SURF_ID='my surf', SPATIAL_STATISTIC='SURFACE AREA',
+ID='surf area'/
+```
+
+**Limiting the Integration**
+
+输入参数 QUANTITY_RANGE 可用来限制 “面积积分AREA INTEGRAL”、“体积积分VOLUME INTEGRAL’,”、“质量积分MASS INTEGRAL’, ”和 “面 积积分SURFACE INTEGRAL ”的积分区域。如果设置了 QUANTITY_RANGE，则只有当QUANTITY值在 QUANTITY_RANGE 范围内时才会进行积分，QUANTITY_RANGE(1) 是下限，QUANTITY_RANGE(2) 是上限。例如
+
+```fortran
+&DEVC XB=..., QUANTITY='MASS FRACTION', SPEC_ID='METHANE', SPATIAL_STATISTIC='MASS
+INTEGRAL', QUANTITY_RANGE=0.03,0.15/
+```
+
+将输出体积 XB 中甲烷的总质量，其中质量分数介于 0.03 和 0.15 之间。
+
+还有一组附加的 SPATIAL_STATISTIC 与 QUANTITY_RANGE 配合使用：“MASS（质量）”、“VOLUME（体积）”和 “SURFACE AREA（表面积）”。这些统计量可输出QUANTITY位于 QUANTITY_RANGE 范围内的质量、体积或表面积（对于固相量）。例如
+
+```fortran
+&DEVC XB=..., QUANTITY='TOTAL HEAT FLUX', SPATIAL_STATISTIC='SURFACE AREA',
+QUANTITY_RANGE(1)=10./
+```
+
+将输出容积 XB 中总热流量超过 10 kW/m2 的总表面积。
+
+### Temporally-Integrated Outputs
+
+除空间统计外，还可通过参数 TEMPORAL_STATISTIC 将时间统计应用于 DEVC 输出。可以在 DEVC 行中同时指定 SPATIAL_STATISTIC 和 TEMPORAL_STATISTIC，前提是这两个参数的组合是合理的。SPATIAL_STATISTIC 首先应用，例如对给定体积 XB 上的QUANTITY进行积分，然后再应用 TEMPORAL_STATISTIC，就像时间积分一样。
+
+**Time Average**
+
+通常默认使用 TEMPORAL_STATISTIC='TIME AVERAGE'（时间平均值），除非该统计量不适合所选的数量。使用该统计量时，FDS 输出QUANTITY在输出时间之前的 DT_DEVC s 时间段内的平均值。参数 DT_DEVC 在 DUMP 行中指定。
+
+**Running Average**
+
+TEMPORAL_STATISTIC='RUNNING AVERAGE（运行平均值）'将输出从 STATISTICS_START 开始到 STATISTICS_END 结束的时间段内QUANTITY的运行平均值。这是第 22.2.5 节中讨论的 “线路 ”设备的默认行为。
+
+**Favre Average**
+
+TEMPORAL_STATISTIC='FAVRE AVERAGE'（法夫尔平均值）输出从 STATISTICS_START 开始到 STATISTICS_END 结束的时间段内QUANTITY的法夫尔（密度加权）运行平均值。如果感兴趣的标量为$\phi$，密度为$\rho$，且运行平均值由加权条定义（即 $\bar\phi$是标量的运行平均值），则法弗尔平均值用斜线表示，计算公式为$\tilde\phi=\bar{\rho\phi}/\bar\rho$ 。该输出与 INITIAL_VALUE 不兼容。
+
+**Instantaneous Value**
+
+由于各种原因，您可能希望输出未经过时间平均或任何处理的 QUANTITY（数量）值。有时这对设备和控制功能很重要。要输出瞬时值，请将 TEMPORAL_STATISTIC 设置为 “INSTANT VALUE”。
+
+**Smoothed Value**
+
+使用设备作为输入的控制函数使用由每个设备的 SMOOTHING_FACTOR 决定的设备值。要输出设备的平滑值，请将 TEMPORAL_STATISTIC 设置为 “SMOOTHED”。该统计量输出的是瞬时平滑值，而不是输出区间内平滑值的时间平均值。
+
+**Time Integral**
+
+TEMPORAL_STATISTIC='TIME INTEGRAL'生成时间积分的离散模拟量：
+$$
+\int_{t_0}^t\phi\left(\tau\right)\mathrm{d}\tau
+$$
+**Minimum and Maximum Values over Time**
+
+将 TEMPORAL_STATISTIC 设置为 “MIN ”或 “MAX”，以确定某一时间间隔内QUANTITY的最小值或最大值：
+$$
+\min_{t_0<=t<=t_1}\phi\left(t\right)\quad;\quad\max_{t_0<=t<=t_1}\phi\left(t\right)
+$$
+其中 t0 为 STATISTICS_START，t1 为 STATISTICS_END。
+
+在某些应用中，您可能需要预测比模拟时间更长的时间间隔内QUANTITY的最小值或最大值。例如，在风能工程中，所谓的 50 年最大风速可以通过收集 10 年内的最大年值来估算。我们的想法是，极端值符合某些统计分布，我们可以从这些分布中推断出长时间段内的极端值。在 FDS 中，您也可以做类似的事情。如果在 DEVC 行中添加参数 TIME_PERIOD，同时将 TEMPORAL_STATISTIC 设置为 “MIN ”或 “MAX”，则由 t0 和 t1 限定的时间间隔将被细分为 N =N_INTERVALS（默认为 10），每个时间间隔都将存储一个最小值或最大值。模拟结束时，最大值（最小值的处理方法类似）按升序排列，m = 1,N。接下来介绍累积统计分布 [^67]：
+$$
+F(\phi)=1-\exp[-\exp(\phi)]\quad;\quad\phi=\ln[-\ln(1-F)]
+$$
+表示在给定时间间隔内不超过 $\phi$值的概率[^22-1]，即 (t1 -t0)/N。假设 N 个递增最大值的概率均为 m/(N+1)。将 $\phi$ 与右边的表达式相对照，可以得到一条近似的直线，我们可以从中估算出适合较长 TIME_PERIOD 的$\phi$ 值，即在相对较短的时间间隔 (t1 -t0)/N 内不被超过的概率非常接近 1 的值。 回到风能工程的例子，在某一年不超过 50 年风速的概率为 1-1/50=0.98。
+
+**Time to Reach Minimum and Maximum Value**
+
+TEMPORAL_STATISTIC 的 “MAX TIME（最大时间）”或 “MIN TIME（最小时间）”分别指定了给定QUANTITY达到最大值或最小值的时间。
+
+**Root Mean Square (RMS)**
+
+TEMPORAL_STATISTIC='RMS'会对QUANTITY $\phi$ 的均方根进行无偏估计：
+$$
+\phi_{\mathrm{rms}}=\sqrt{\frac{\sum_{i=1}^n(\phi_i-\overline{\phi})^2}{n-1}}
+$$
+计算从 STATISTICS_START 开始，到 STATISTICS_END 结束。
+
+**Favre Root Mean Square**
+
+TEMPORAL_STATISTIC='FAVRE RMS'会对QUANTITY $\phi$的密度加权均方根进行无偏估计：
+$$
+\tilde{\phi}_{\mathrm{rms}}=\sqrt{\frac{\sum_{i=1}^n(\phi_i-\tilde{\phi})^2}{n-1}}\quad;\quad\tilde{\phi}=\overline{\rho\phi}/\overline{\rho}
+$$
+计算从 STATISTICS_START 开始，到 STATISTICS_END 结束。该输出与 INITIAL_VALUE 不兼容。
+
+**Covariance**
+
+如果 $u=U-\overline{U}$ 和$v=V-\overline{V}$是两个随机变量 U 和 V 的偏差，那么协方差的无偏估计值为
+$$
+\overline{uv}=\frac{\sum_{i=1}^n(U_i-\overline{U})(V_i-\overline{V})}{n-1}
+$$
+要输出该统计量，必须在 DEVC 行添加 QUANTITY2，并设置 TEMPORAL_STATISTIC='COV'。以下各行将创建一行设备和一个相当于该行第一个点的单点设备：
+
+```fortran
+&DEVC XB=X1,X2,Y1,Y2,Z1,Z2, QUANTITY='CELL W', QUANTITY2='TEMPERATURE',
+TEMPORAL_STATISTIC='COV', ID='wT-cov_line', POINTS=20 /
+&DEVC XYZ=X1,Y1,Z1, QUANTITY='CELL W', QUANTITY2='TEMPERATURE',
+TEMPORAL_STATISTIC='COV', ID='wT-cov_point', STATISTICS_START=20. /
+```
+
+**Correlation Coefficient**
+
+设置 TEMPORAL_STATISTIC='CORRCOEF'可输出相关系数，其值为
+$$
+\rho_{u\nu}=\frac{\overline{u\nu}}{u_{\mathrm{rms}}\nu_{\mathrm{rms}}}
+$$
+同样，您必须在设备行添加 QUANTITY2。
+
+### Linear Array of Point Devices
+
+您可以使用单个 DEVC 行来指定设备的线性阵列。通过添加参数 POINTS 和使用六倍坐标数组 XBP[^22-2]，您可以指示 FDS 创建一条从 (x1,y1, z1) 到 (x2,y2, z2) 的设备线。有两个选项。
+
+**Steady-State Profile**
+
+有时，计算稳态剖面比较方便。例如，可以通过以下输入行记录沿门口中心线的垂直速度剖面：
+
+```fortran
+&DEVC XBP=X1,X2,Y1,Y2,Z1,Z2, QUANTITY='U-VELOCITY', ID='vel', POINTS=20,
+STATISTICS_START=20., STATISTICS_END=40. /
+```
+
+在名为 CHID_line.csv 的文件中，将有 1 至 4 列数据与这条 DEVC 线路相关联。如果 X1 与 X2 不同，则会有一列 x 坐标与线性点阵列相关联。y 和 z 坐标也是如此。最后一列包含在 STATISTICS_START 和 STATISTICS_END 之间的时间间隔内平均的 20 个温度点。后者的默认值为 T_END，前者为总模拟时间的一半。这是一种方便的方法，可以输出某个量（如热电偶阵列）的时间平均线性轮廓。请注意，输出到_line.csv 文件的统计数据从 T=STATISTICS_START 开始平均。在此之前，数值为零。这样可以防止初始瞬态对最终平均值或其他时间统计数据产生偏差。
+
+默认情况下，点的间距均匀分布在 (x1,y1, z1) 和 (x2,y2, z2) 之间。要改变这种情况，可以添加坐标值数组 POINTS_ARRAY_X、POINTS_ARRAY_Y 和/或 POINTS_ARRAY_Z。例如
+
+```fortran
+&DEVC XBP=0,0,0,0,0,1, QUANTITY='TEMPERATURE', ID='T', POINTS=4,
+POINTS_ARRAY_Z=0.1,0.2,0.3,0.7 /
+```
+
+在垂直方向上创建一个由四个点组成的数组，这些点的间距并不均匀。数组 XBP 中的原始值 0 和 1 将被忽略。使用所有三个 POINTS_ARRAY，可以创建一条由点组成的曲线。这些数组的上限维数为 100。
+
+单个 “行 ”文件可以包含多行数据。默认情况下，坐标列使用 DEVC 的 ID 加 -x、-y 或 -z 进行标注。要更改这些标签，请使用 X_ID、Y_ID 和/或 Z_ID。要完全抑制坐标列，可在 DEVC 行添加 HIDE_COORDINATES=T。如果有多个数据数组使用相同的坐标，这将非常方便。如果希望将数据绘制为与原点距离$r=\sqrt{x^{2}+y^{2}+z^{2}}$的函数，请提供标签 R_ID。如果希望将数据绘制为到直线上第一个点 (X1,Y1,Z1) 的距离的函数，请提供标签 D_ID。
+
+您可以通过在 DEVC 行上设置 COORD_FACTOR 来转换稳态剖面的空间坐标。例如，要将默认单位米转换为厘米，可将 COORD_FACTOR 设置为 100。同时将 XYZ_UNITS 设置为相应的字符串，本例中为 XYZ_UNITS='cm'。
+
+**Time-Varying Profile**
+
+如果您不需要稳态曲线，而只想指定一个均匀分布的设备阵列，则可以使用类似的输入行，但要附加 TIME_HISTORY 属性。
+
+```fortran
+&DEVC XBP=X1,X2,Y1,Y2,Z1,Z2, QUANTITY='U-VELOCITY', ID='vel', POINTS=20,
+TIME_HISTORY=T /
+```
+
+这样，FDS 就会将 20 个设备添加到正在运行的列表中，从而省去了写 20 行 DEVC 的麻烦。每个设备的 ID 将是 “vel-01”、“vel-02 ”等。
+
+**Other Statistics for a Linear Array of Devices**
+
+默认情况下，如果在 DEVC 行中指定多个POINTS，且未指定 TIME_HISTORY=T，则会在每个点位置保存指定 QUANTITY 的运行平均值，并将 STATISTICS_END 时的累积值写入后缀为 _line.csv 的文件。不过，您也可以应用任何其他 TEMPORAL_STATISTIC，例如计算指定时间间隔内的均方根值（“RMS”）、最小值（“MIN”）或最大值（“MAX”）。
+
+您还可以为行内的每个设备指定 SPATIAL_STATISTIC，如下所示：
+
+```fortran
+&DEVC XBP=1,10,5,5,8,8, QUANTITY='TEMPERATURE', ID='Tmean', POINTS=20,
+STATISTICS_START=20., STATISTICS_END=40.
+SPATIAL_STATISTIC='MEAN', DX=0.1, DY=5.0, DZ=3.0 /
+```
+
+该输入行指定了一个包含 20 个点的线性数组，起点为 x = (1,5,8)，终点为 x = (10,5,8)。对于数组中的每个点（xi,yi, zi），FDS 会计算体积 $xi -δx ≤ x ≤ xi +δx$；$yi -δy ≤ y ≤ yi +δy$；$zi -δz ≤ z ≤ zi +δz$的平均温度。然后在 20 秒至 40 秒的时间间隔内对这些平均温度进行时间平均。一般来说，首先进行空间平均；也就是说，FDS 报告的是线性阵列中每个点的空间平均温度的时间平均值，而不是时间平均温度的空间平均值。
+
+**Moving a Linear Array of Devices**
+
+使用 MOVE 行上的参数可以平移和/或旋转设备的线性阵列（见第 11.4 节）。要指定这些参数，请使用 DEVC 行上的字符串 MOVE_ID。请注意，如果指定了 SPATIAL_STATISTIC（空间静态）参数，则不会对空间边界 DX、DY 和/或 DZ 进行变换。
+
+## In-Depth Profiles within Solids: The PROF Namelist Group
+
+FDS 在每个边界单元使用精细的一维网格来计算固体内部的热传导和反应。固体可以是壁单元或拉格朗日粒子。无论哪种情况，都可以使用 PROF 输出来记录固体在离散时间间隔内的深度属性。PROF 可以使用任何以DEPTH为单位的固相输出 QUANTITY。表 22.13 中的文件类型为 “Pr”。
+
+PROF 管线的参数见表 23.23。壁面单元的参数与 DEVC 组中指定表面量的参数类似。XYZ 表示坐标三元组，IOR 表示方向，ID 表示识别字符串。下面举例说明如何使用该功能获取壁细胞内温度曲线的时间历史：
+
+```fortran
+&PROF ID='T-1', XYZ=..., QUANTITY='INSIDE WALL TEMPERATURE', IOR=3 /
+```
+
+对于粒子，必须引用用于将粒子置于域中的 INIT 行：
+
+```fortran
+&INIT ID='my particle', XYZ=..., N_PARTICLES=1, PART_ID='...' /
+&PROF ID='T-2', INIT_ID='my particle', QUANTITY='INSIDE WALL TEMPERATURE' /
+```
+
+对于粒子，请勿在 PROF 行指定 XYZ 或 IOR。
+
+QUANTITY 是要记录的物理量。每个 PROF 行都会创建一个单独的文件。每行的第一个数字是提取剖面的时间。第二个数字是 “节点 ”数 n，即固相单元数加 1。接下来的 n 个数值是节点坐标，从表面的 0 到最后的全THICKNESS。接下来的 n 个数字是节点处的 QUANTITY值。其中第一个值位于表面。如果指定 CELL_CENTERED=T，QUANTITY值将记录在 n 个内部单元中心，而不是单元边界。ID 是一个可选输入项，如果提供，将用于文件头。
+
+还有第二种可选格式。如果在 PROF 行指定 FORMAT_INDEX=2，生成的文件将只包含最终节点坐标和数量值。这对于显示稳态温度曲线非常方便。
+
+## Animated Planar Slices: The SLCF Namelist Group
+
+通过 SLCF（“切片文件”）名表组参数（表 23.29）可以记录多个点的各种气相量。切片 "是指整个域的一个子集。它可以是直线、平面或体积，具体取决于 XB 的值。六元组 XB 表示 “切片 ”平面的边界。XB 的规定与 OBST 或 VENT 组相同，6 个值中可以有 0、2 或 4 个相同，分别表示体积、平面或直线。举例来说，如果希望保存整个平面 y = 5.3 的域切面，可以指定 PBY=5.3 而不是 XB。PBX 和 PBZ 分别控制垂直于 x 轴和 z 轴的平面。另一种指定域中间切平面的方法是使用 DB，其值为 “XMID”、“YMID ”或 “ZMID”。
+
+默认情况下，每次模拟都会保存 1-D 和 2-D 切片文件 NFRAMES 次。您可以使用 DUMP 行中的 DT_SLCF 控制输出频率。如果 “切片 ”是三维体，则其输出频率由参数 DT_SL3D 控制。您可以在 DUMP 上指定 DT_SL3D 的值，也可以提供一系列离散时间。请注意，如果 DT_SL3D 较小，3-D 切片文件可能会变得非常大。
+
+如果给定的 SLCF 线具有 VECTOR=T 属性，则可在 Smokeview 中创建动画矢量。如果两个 SLCF 条目位于同一平面内，则只需其中一条线具有 VECTOR=T 属性，否则将创建一组多余的速度分量切片。
+
+通常情况下，FDS 在单元角处平均切片文件数据。例如，气体温度是在单元中心计算的，但它们被线性插值到单元角，并输出到 Smokeview 读取的文件中。为避免这种情况发生，可设置 CELL_CENTERED=T 这样 FDS 就会强制输出以单元格为中心的实际数据，而不进行平均。请注意，此功能主要用于诊断，因为它可以让您直观地看到 FDS 实际计算的值。如果 CELL_CENTERED=T 与 VECTOR=T 结合使用，则将显示交错的速度分量。例如
+
+```fortran
+&SLCF PBY=0, QUANTITY='VELOCITY', VECTOR=T, CELL_CENTERED=T /
+```
+
+将在 Smokeview 中以单元面法向量的形式显示交错的速度分量。
+
+切片文件信息记录在标有 CHID_n.sf 的文件中（见第 27.9 节），其中 n 是切片文件的索引。**一个简短的 Fortran 程序 fds2ascii.f90 可以从一行、一个平面或一卷数据中生成一个文本文件。**详见第 22.11 节。
+
+默认情况下，Smokeview 会对障碍物内的切片文件数据进行空白处理。但是，对于大型案例，在 Smokeview 启动时加载这一功能的成本很高。如果希望 Smokeview 不存储此空白阵列，可在 MISC 上设置 IBLANK_SMV=F。另一种方法是从命令行运行 Smokeview，并添加 -noblank 作为选项。
+
+您可以通过 SLCF 上的 ID 添加姓名，作为发送到 Smokeview 的标识符。这只是可选项。
+
+## Animated Boundary Quantities: The BNDF Namelist Group
+
+BNDF（“边界文件”）名表组参数允许您记录所有固体障碍物的表面量。与 SLCF 组一样，每个量都有单独的 BNDF 行，输出文件格式为 CHID_n.bf。但无需指定物理坐标，只需指定QUANTITY即可。见表 22.5。对于某些输出量，需要通过 PROP 命名列表组指定附加参数。在这种情况下，在 BNDF 行中添加字符串 PROP_ID，告诉 FDS 在哪里可以找到必要的额外信息。
+
+BNDF 文件（第 27.11 节）可能会变得非常大，因此在 DUMP 行上指定时间间隔 DT_BNDF 或离散时间 RAMP_BNDF 时要小心。减少输出文件大小的方法之一是关闭绘制所需障碍物的边界信息。在任何给定的 OBST 行中，如果包含字符串 BNDF_OBST=F，则障碍物不会着色。要关闭所有边界绘制，请在 MISC 行设置 BNDF_DEFAULT=F。然后，可以通过 BNDF_OBST=T 在相应的 OBST 行上重新打开各个障碍物。可以通过 BNDF_FACE(IOR)来控制给定障碍物的各个面，其中 IOR 是方向索引（+1 表示正 x 方向，-1 表示负 x 方向，以此类推）。通常情况下，FDS 会对单元角的边界文件数据进行平均处理。例如，表面温度是在每个表面单元的中心计算的，但它们会被线性插值到单元角，并输出到 Smokeview 读取的文件中。为防止这种情况发生，可在 BNDF 行中设置 CELL_CENTERED=T。这将强制 FDS 输出实际的以单元格为中心的数据，而不进行平均处理。**请注意，此功能主要用于诊断**。
+
+可以使用 GEOM 行的 BNDF_GEOM 逻辑控制将边界文件应用于复杂几何图形。请注意，GEOM 的 BNDF 输出只使用面居中值（节点居中不可用；用户无需设置 CELL_CENTERED=T）。
+
+有时，将QUANTITY整合到时间中会很有用。例如，可以对单位为 kW/m2 的热通量进行时间积分，得出表面吸收的总能量（单位为 kJ/m2）。为此，请将 BNDF 行中的 TEMPORAL_STATISTIC 设置为 “TIME INTEGRAL”。请注意，BNDF 行中的 TEMPORAL_STATISTIC 没有其他选项。
+
+## Animated Isosurfaces: The ISOF Namelist Group
+
+ISOF （“ISOsurface File”）名表组创建气相标量的三维动画轮廓。例如，300 ◦C 温度等值面是气体温度为 300 ◦C 的三维表面。通过这条线可以保存三个不同的温度值：
+
+```fortran\
+&ISOF QUANTITY='TEMPERATURE', VALUE(1)=50., VALUE(2)=200., VALUE(3)=500. /
+```
+
+其中数值单位为 ◦C。请注意，等值面输出文件 CHID_n.iso 可能会变得非常大，因此请尝试使用不同的采样率（DT_ISOF 或离散时间 RAMP_ISOF，可在 DUMP 行中指定）。参数 QUANTITY2 可用来为等值线着色。例如
+
+```fortran
+&ISOF QUANTITY='MIXTURE FRACTION' , VALUE(1)=0.05, QUANTITY2='TEMPERATURE' /
+```
+
+绘制混合物分数为 0.05 kg/kg 的表面，并用温度为表面着色。还可以使用参数 SKIP=n（默认值：1）跳过每个方向上的 n-1 个值来减少数据。也可以使用参数 DELTA=val 强制每个三角形的所有边都大于 val 来减少数据。
+
+任何气相量都可以通过等值面进行动画演示，但要小心谨慎。要渲染等值面，必须在每个输出时间步的每个网格单元中计算所需的量。对于 “TEMPERATURE ”等量，这不是问题，因为 FDS 会计算并保存这些量。但是，物种体积分数需要大量时间在每个网格单元中计算。如有必要，请记住包含与给定QUANTITY相对应的 SPEC_ID。
+
+## Plot3D Static Data Dumps
+
+存储在 Plot3D [^68]文件中的数据使用的是 NASA 开发的格式，许多 CFD 程序都使用这种格式来表示模拟结果。有关文件结构的描述，请参见第 27.10 节。Plot3D 数据有三种可视化方式：二维等值线、矢量图和等值面。如果 Plot3D 文件中存储了一个或多个 u、v 和 w 速度分量，则可以查看矢量图。矢量长度和方向显示流体流动的方向和相对速度。矢量颜色显示流体标量，如温度。在一个瞬间，有五个量被写入文件。默认规格为
+
+```fortran
+&DUMP ..., PLOT3D_QUANTITY(1:5)='TEMPERATURE',
+'U-VELOCITY','V-VELOCITY','W-VELOCITY','HRRPUV' /
+```
+
+速度分量最好保持不变，因为 Smokeview 使用它们来绘制速度矢量。如果任何指定的量需要额外指定一个特定种类，请使用 PLOT3D_SPEC_ID(n) 为 PLOT3D_QUANTITY(n)提供 SPEC_ID。
+
+Plot3D 数据存储在扩展名为 .q 的文件中。如果使用其他可视化软件包渲染文件，还可选择输出一个包含坐标信息的文件。如果在 DUMP 行中写入 WRITE_XYZ=T，则会写出一个后缀名为 .xyz 的文件。Smokeview 不需要这个文件，因为坐标信息可以从其他地方获得。
+
+过去的 FDS 版本（1-5）默认输出 Plot3D 文件。现在，您必须在 DUMP 行中使用 DT_PL3D 指定转储之间的时间间隔。
+
+## SMOKE3D: Realistic Smoke and Fire
+
+对于任何涉及燃烧的模拟，FDS 都会自动创建三个输出文件，由 Smokeview 渲染成逼真的烟、火和/或热气。默认情况下，输出量为 “SOOT ”的 “DENSITY”、“HRRPUV”（单位体积热释放率）和气体的TEMPERATURE。这些数值以半透明切片的形式呈现，让人有一种透过烟雾或火焰观察的错觉。数值越大，切片整体看起来越暗。**对于 HRRPUV，呈现的最低值是**
+$$
+\dot{q}_{\min}^{\prime\prime}=\min(200,20/\delta x)\quad\mathrm{kW/m^3}
+$$
+$\delta x$为单元格大小。
+
+除 “SOOT ”外，您还可以选择渲染任何其他种类的DENSITY，只要 SPEC 行上的 MASS_EXTINCTION_COEFFICIENT 适合描述指定气体种类对可见光的衰减。下面是一个如何更改烟雾种类的示例。通常情况下，您不需要这样做，因为在 REAC 行定义了非零 SOOT_YIELD 时，“烟雾 ”是默认燃烧模型的假定部分。
+
+```fortran
+&SPEC ID='MY SMOKE', MW=29., MASS_EXTINCTION_COEFFICIENT=8700. /
+&SM3D QUANTITY='DENSITY', SPEC_ID='MY SMOKE' /
+```
+
+MASS_EXTINCTION_COEFFICIENT 传递给 Smokeview 以用于可视化。
+
+FDS 将三维烟雾量输出为使用运行长度编码压缩的 8 位整数。烟尘密度、HRRPUV 或温度首先按比例转换为 8 位整数（烟尘密度首先转换为不透明度）。重复的整数用 nI 代替，其中 n 是重复的次数，I 是重复的值。如果需要更高分辨率，可在 MISC 行设置 SMOKE3D_16=T，将这些量输出为 16 位整数。对于每个时间帧，FDS 会输出时间、最小值、最大值以及在最小值和最大值之间缩放的 16 位整数。这些数据将输出到扩展名为 .s16 而非 .s3d 的文件中。这些 16 位整数值未经压缩。
+
+## Particle Output Quantities
+
+本节讨论拉格朗日粒子的输出选项。
+
+### Liquid Droplets that are Attached to Solid Surfaces
+
+除非另有指示，否则液滴（相对于固体颗粒）会 “粘 ”在固体表面上。有多种量可以描述这些液滴。例如，“MPUA ”是由 PART_ID 定义的液滴[^22-3]的单位面积质量。同样，“AMPUA ”是单位面积累积质量。二者的单位都是 kg/m2。可以将这些输出分别视为单位面积瞬时质量密度和累积总量的度量。这些量并非完全相同。AMPUA “量类似于 ”水桶测试"，即把水滴收集到水桶中，并在给定时间段结束时确定总质量。在这种情况下，地板上的每个网格单元都被视为自己的水桶。每个液滴只有到达地面时才会被计算一次[^22-4]。只要液滴位于任何固体表面（包括墙壁）上，MPUA 都会对其进行计数。如果液滴从一个固壁单元移动到另一个固壁单元，则会再次计数。给定类型的液滴对固体表面的冷却作用用 “CPUA ”表示，即单位面积冷却作用，单位为 kW/m2。由于典型的喷水器模拟只能跟踪喷水器喷出的一小部分水滴，因此 MPUA 和 CPUA 都会进行指数平滑处理。这样可以避免由于液滴不常到达而导致表面出现斑点分布，因为这些液滴可能具有较高的权重系数。
+
+上述每种输出量都有一个变种，即按粒子种类而不是粒子类型求和。例如，“AMPUA_Z ”量加上指定的 SPEC_ID（而不是 PART_ID），将对具有指定 SPEC_ID 的所有粒子类别的给定输出量求和。
+
+以如何使用这些输出量为例，测试用例 bucket_test_1 描述了安装在 5 米高天花板下 10 厘米处的单个喷淋器。水流以 180 升/分钟的恒定速度持续 30 秒（在 1 秒内上升或下降）。模拟再持续 10 秒，让水滴有时间到达地面。流出的水的总质量为
+$$
+180\mathrm{~\frac{L}{min}}\times1\mathrm{~\frac{kg}{L}}\times\frac{1}{60}\mathrm{~\frac{min}{s}}\times30\mathrm{~s}=90\mathrm{~kg}
+$$
+在模拟中，DEVC 行指定了 SPATIAL_STATISTIC=“SURFACE INTEGRAL ”的量 “AMPUA”。这将导致 FDS 对 XB 所定义的体积（在本例中为整个楼层）中的每个网格单元的 “AMPUA ”进行求和，这与存在一个与 XB 所指定区域大小相同的单个水桶的情况类似。将整个地板上的 “AMPUA ”值相加，得出总重量为 90 千克（图 22.1）。请注意，实际上没有必要对结果进行时间平均。数量本身就是累积的。
+
+![image-20241223180556636](./../FUG6.9.1翻译.assets/image-20241223180556636.png)
+
+### Solid Particles on Solid Surfaces
+
+如果要监测固体表面上掉落的固体颗粒的积累情况，请使用以下装置：
+
+```fortran
+&DEVC ID=..., XB=..., QUANTITY='MPUV', PART_ID='rods', SPATIAL_STATISTIC='VOLUME
+INTEGRAL' /
+```
+
+进行积分的体积 XB 应至少比表面厚一个网格单元。
+
+### Droplet and Particle Densities and Fluxes in the Gas Phase
+
+在远离固体表面的地方，“MPUV ”是（PART_ID）类型的颗粒或液滴的单位体积质量，单位为 kg/m3。单元中液滴的平均体积分数为 “DROPLET VOLUME FRACTION（液滴体积分数）”，等于 MPUV 除以液滴的液体密度。MPUV_Z "提供了单个物种（SPEC_ID）所有液滴的综合信息。
+
+PARTICLE FLUX X“、”PARTICLE FLUX Y “和 ”PARTICLE FLUX Z "量分别产生 x、y 和 z 方向上粒子质量流量的切片和 Plot3D 彩色等值线，单位为 kg/m2/s。您还可以将这些量应用到设备中。例如，在名为 bucket_test_4.fds 的案例中，输入行
+
+```fortran
+&DEVC XB=..., ID='flux', QUANTITY='PARTICLE FLUX Z', SPATIAL_STATISTIC='AREA
+INTEGRAL' /
+```
+
+记录了通过给定水平面的所有粒子的综合质量通量。图 22.2 显示了这一简单测试案例的结果：以每秒 0.0005 千克的速度喷洒的水在 55 秒内通过测量平面并落到地面上。积水总量为 0.0275 千克。
+
+![image-20241223180742770](./../FUG6.9.1翻译.assets/image-20241223180742770.png)
+
+PARTICLE RADIATION LOSS量以千瓦/立方米为单位，报告特定网格单元内所有粒子发射和吸收的净能量。正值表示发射大于吸收。
+
+### Coloring Particles and Droplets in Smokeview
+
+部件（PART）行中的参数 QUANTITIES 是一个字符串数组，表示 Smokeview 中应使用哪些标量给粒子和液滴着色。可选项有
+
+```fortran
+’PARTICLE AGE’ (s)
+’PARTICLE DIAMETER’ (μm)
+’PARTICLE TEMPERATURE’ (◦C)
+’PARTICLE MASS’ (kg)
+’PARTICLE PHASE’
+’PARTICLE VELOCITY’ (m/s)
+’PARTICLE WEIGHTING FACTOR’
+’PARTICLE U’, ’PARTICLE V’, ’PARTICLE W’ (m/s)
+’PARTICLE X’, ’PARTICLE Y’, ’PARTICLE Z’ (m)
+’PARTICLE ACCEL X’, ’PARTICLE ACCEL Y’, ’PARTICLE ACCEL Z’ (m/s2)
+’PARTICLE DRAG FORCE X’, ’PARTICLE DRAG FORCE Y’, ’PARTICLE DRAG FORCE Z’ (N)
+’PARTICLE DRAG COEFFICIENT’
+’PARTICLE BULK DENSITY’ (kg/m3)
+’PARTICLE HEAT TRANSFER COEFFICIENT’ (W/m2/K)
+’PARTICLE RADIATIVE HEAT FLUX’ (kW/m2)
+’PARTICLE CONVECTIVE HEAT FLUX’ (kW/m2)
+’PARTICLE TOTAL HEAT FLUX’ (kW/m2)
+```
+
+如果在 Smokeview 中没有指定 “数量”（QUANTITIES），也没有选择 “数量”（QUANTITIES），那么 Smokeview 将以一种由分配给 “部分”（PART）类的 SURF_ID 颜色决定的颜色来显示粒子，但水滴和液体燃料滴除外，它们的颜色分别为蓝色和黄色。如果没有在 SURF 上指定颜色，那么默认的固体粒子颜色将恢复为黑色。您可以通过在 PART 行指定 RGB 或 COLOR 来覆盖 SURF 颜色。
+
+颗粒权重系数（PARTICLE WEIGHTING FACTOR）描述了每个计算颗粒所代表的实际颗粒数。颗粒体积密度（PARTICLE BULK DENSITY）给出了每个网格单元体积的加权（总）质量，这是用颗粒表示植被等多孔介质时的一个重要参数。
+
+对于指定 SURF_ID 的固态颗粒，可以指定表 22.7 中列出的任何固相输出量。如果指定的量与物种相关联，则使用参数 QUANTITIES_SPEC_ID(N) 指定物种。这里的 N 指的是 PART 行中指定输出量的顺序。
+
+### Detailed Properties of Solid Particles
+
+您可以使用 DEVC（设备）行输出单个固体粒子的属性。例如
+
+```fortran
+&INIT ID='my particle', PART_ID='...', XB=..., N_PARTICLES=1 /
+&DEVC ID='...', INIT_ID='my particle', QUANTITY='WALL TEMPERATURE' /
+```
+
+输出通过 INIT 线引入模拟的单个粒子的表面温度。
+
+如果 INIT 行有一个 MULT_ID，即通过该 INIT 行引入了一个粒子数组，那么每个粒子的 INIT_ID 采用“[ID]-00308 ”的形式，其中 ID 是 INIT 行的 ID，308 是指乘法序列生成的第 308 个 INIT 行。INIT 行是通过循环 x 指数、y 指数、z 指数产生的。例如，以下输入行
+
+```fortran
+&INIT ID='P', PART_ID='CRIB1', XYZ=0.005,0.005,0.005 ,
+N_PARTICLES=1, CELL_CENTERED=T, MULT_ID='array' /
+&MULT ID='array', DX=0.01, DY=0.01, DZ=0.01, I_LOWER=0, I_UPPER=9,
+J_LOWER=0, J_UPPER=9, K_LOWER=0, K_UPPER=3 /
+&DEVC ID='T307', INIT_ID='P-00307', QUANTITY='WALL TEMPERATURE' /
+```
+
+指定一个 10×10×4 的粒子阵列。我们希望记录第 307 个粒子的表面温度。有关如何解释 MULT 行的详细信息，请参阅第 7.6 节。
+
+固体颗粒可用作替代目标。例如，以下输入行创建了一个无质量粒子，可用于记录远离实体墙的给定位置的热通量。在本例中，模拟热通量计指向 -x 方向：
+
+```fortran
+&DEVC ID='flux', INIT_ID='f1', QUANTITY='RADIATIVE HEAT FLUX' /
+&INIT ID='f1', XYZ=..., N_PARTICLES=1, PART_ID='rad gauge' /
+&PART ID='rad gauge', STATIC=T, ORIENTATION=-1,0,0, SURF_ID='target' /
+&SURF ID='target', RADIUS=0.001, GEOMETRY='SPHERICAL', EMISSIVITY=1. /
+```
+
+请注意，DEVC 行并不包含设备坐标，而是对 INIT 行的引用，该行将单个代用粒子定位在 XYZ 点。INIT 行引用了 PART 行，该行提供了粒子的相关信息，尤其是热通量计的方向。引用 SURF 线主要是为了保持一致性--FDS 需要了解粒子的几何形状，尽管它实际上只是一个 “目标”。其体积毫无意义。代理粒子的功能可以扩展到模拟一系列设备。我们可以创建一系列热通量计，而不是一个热通量计：
+
+```fortran
+&DEVC ID='flux', INIT_ID='f1', POINTS=34, QUANTITY='RADIATIVE HEAT FLUX', X_ID='x' /
+&INIT ID='f1', XYZ=..., N_PARTICLES=34, DX=0.05, PART_ID='rad gauge' /
+```
+
+请注意，INIT 行的参数 DX 将创建一条粒子线，从 XYZ 点开始，每隔 0.05 米重复一次。有关通过参数 POINTS 指定设备阵列的更多信息，请参见第 22.2.5 节。
+
+****
+
+[^22-1]:请注意，无参数形式的分布仅用于外推法。
+[^22-2]:早期版本的 FDS 使用数组 XB 来指定点设备线性数组的外延。然而，XB 可能需要指定与每个设备相关的 SPATIAL_STATISTIC 的特定类型。
+[^22-3]:输出量 “MPUA ”可用于液体和固体颗粒。但是，“AMPUA ”只适用于液滴。
+[^22-4]:请注意，液滴撞击 “地面”（即 z = ZMIN 平面）时的默认行为是消失（MISC 行中的 POROUS_FLOOR=T）。在这种情况下，“MPUA ”将为零，但 “AMPUA ”不会。FDS 在将液滴从模拟中移除之前会存储液滴质量，以节省 CPU 时间。
+
+## Special Output Features
+
+本节列出了各种输出量，它们对研究热驱动流、燃烧、热解等非常有用。请注意，某些输出量可以通过多种方式产生。
+
+### Heat Release Rate and Energy Conservation
+
+与总体能量预算相关的数量在逗号分隔文件 CHID_hrr.csv 中报告。该文件是自动生成的；与之相关的唯一输入参数是 DUMP 行中的 DT_HRR 和 RAMP_HRR。该文件中的各列记录了焓传输方程中各 项积分的时间历史。各列定义如下
+$$
+\begin{aligned}\underbrace{\frac{\partial}{\partial t}\int\rho h_\mathrm{s}\mathrm{d}V}_{\mathrm{Q~ENTH}}=\underbrace{\int\dot{q}^{\prime\prime\prime}\mathrm{d}V}_{\mathrm{HRR}}+\underbrace{\left(\dot{q}_{\mathrm{p,r}}-\int\nabla\cdot\dot{\mathbf{q}}_{\mathrm{r}}^{\prime\prime}\mathrm{d}V\right)}_{\mathrm{Q_RADI}}+\underbrace{\sum_{\alpha}\dot{m}_{\mathrm{p,\alpha}}h_{\mathrm{s,\alpha}}-\int\rho\mathbf{u}h_{\mathrm{s}}\cdot\mathrm{dS}}_{\mathrm{Q_CONV}}\\+\underbrace{\left(\dot{q}_{\mathrm{p,w}}-\int\dot{q}_{\mathrm{c}}^{\prime\prime}\mathrm{d}A\right)}_{\mathrm{Q_COND}}+\underbrace{\sum_{\alpha}\int h_{\mathrm{s,\alpha}}\rho D_{\alpha}\nabla Y_{\alpha}\cdot\mathrm{d}\mathbf{S}}_{\mathrm{Q_DIFF}}+\underbrace{\int\frac{d\overline{p}}{\mathrm{d}t}\mathrm{d}V}_{\mathrm{Q_PRES}}\\+\underbrace{\left(-\dot{q}_{\mathrm{p,r}}-\dot{q}_{\mathrm{p,c}}-\dot{q}_{\mathrm{p,w}}\right)}_{\mathrm{Q_PART}}\end{aligned}\label{22.20}\tag{22.20}
+$$
+Q_ENTH 气体显焓的变化。 ρ 是气体密度（千克/立方米）。hs 是气体的显焓（千焦耳/千克）。体积积分是对整个域的积分。
+
+HRR 火灾的总热量释放率（千瓦）。默认情况下，任何表面氧化反应的影响都包含在此值中。这有助于与通过耗氧量热法获得的热量释放测量值进行比较，因为表面反应产生的额外氧气汇将被纳入测量值中。不过，也可以通过在 DUMP 行设置 HRR_GAS_ONLY=T，只输出气相燃烧的贡献值。
+
+Q_RADI 从外部边界或粒子进入域的热辐射。$\dot{\mathbf{q}}_{\mathrm{r}}^{\prime\prime}$是辐射热通量矢量（千瓦/平方米）。它的散度代表气体体积的净辐射排放。通常情况下，Q_RADI 为负值，表示火焰或高温气体将能量辐射出边界。$\dot q_\mathrm{p,r}$ 是液滴或颗粒吸收的辐射（千瓦）。这个项被加到 Q_RADI 中，并从 Q_PART 中减去，因为它隐含在 $\nabla\cdot\dot{\mathbf{q}}_\mathrm{r}^{\prime\prime}$ 中，需要分离出来以便在能量预算中明确计算。
+
+Q_CONV 进入计算域的显焓流。$\dot{m}_{\mathrm{p},\alpha}$是气体种类 α 从固体颗粒或液滴中产生的速率（千克/秒）。hs,α 是气体种类 α 的显焓（kJ/kg）。ρ 是气体密度（kg/m3），u 是速度矢量（m/s）。hs 是气体的显焓值。如果气体流出域外，则 $\mathbf{u}\cdot\mathrm{d}\mathbf{S}$为正值。
+
+Q_COND 进入计算域的对流热通量。$\dot{q}_{\mathrm{c}}^{\prime\prime}$是气体对流到表面的热量。如果气体相对较热，而表面/颗粒/液滴相对较冷，则 Q_COND 为负值。在OPEN边界，Q_COND 为 $\int k\nabla T\cdot\mathrm{d}\mathbf{S}$，其中 $k\mathrm{~(kW/(m\cdot K))}$为气体的湍流热导率，$\nabla T$ 为开放边界上的温度梯度。$\dot{q}_{\mathrm{p,w}}$是指从固体表面（壁）传递到附着在其上的液滴或颗粒的能量。请注意，在 Q_PART 中它被减去了，因为它对气体的能量没有贡献。
+
+Q_PRES 体积膨胀做的功（千瓦）。
+
+Q_PART 气体从液滴或固体颗粒获得能量的速率。$\dot{q}_{\mathrm{p,r}}$是液滴或颗粒吸收的辐射（千瓦）。$\dot{q}_{\mathrm{p,c}}$是气体通过对流传递给液滴或颗粒的能量（千瓦）。$\dot{q}_{\mathrm{p,w}}$是固体表面（壁）传递给附着在其上的液滴或微粒的能量。
+
+另一列 Q_TOTAL 包括等式右边项的总和。理想情况下，该总和应等于左边的 Q_ENTH。所有项均以千瓦为单位报告。
+
+CHID_hrr.csv 文件中的其他列包含以千克/秒为单位的燃料总燃烧速率和区域压力。请注意，由于每种材料的燃烧热可能不同，因此报告的燃烧速率值并未进行调整。因此，报告的总燃烧速率乘以气相燃烧热并不一定等于报告的热释放速率。
+
+请注意，公式 $\eqref{22.20}$中的体积积分是在整个域上进行的。微分 dV 是局部网格单元尺寸 dx dy dz 的乘积。对于二维圆柱坐标的特殊情况，$\mathrm{d}V=r\mathrm{d}r\mathrm{d}\theta\mathrm{d}z$，其中 r = x，dr = dx，dθ = dy。在二维直角坐标情况下（y 方向上有 1 个单元，CYLINDRICAL=.FALSE.），单元体积和面积除以 dy，因此列输出为单位长度值（如 kW/m）。在二维圆柱形情况下，单元体积除以 dy（此处表示弧度）再乘以 2π，以便在 θ 方向上进行完全积分。得出的数值名义上与相应的三维问题相同。示例见图 22.3。
+
+![image-20241223183025006](./../FUG6.9.1翻译.assets/image-20241223183025006.png)
+
+作为对能量平衡的测试，一个名为 Pressure_Solver/hallways.fds 的示例案例模拟了五条相连走廊末端附近的火灾。走廊的另一端是开放的。如图 22.4 所示，Q_ENTH 和 Q_TOTAL 两个量非常接近，表明能量方程中的能量损耗和增益来源得到了正确的加减。不出所料，当隔室达到准稳态时，净能量损益最终归零。
+
+![image-20241223183059376](./../FUG6.9.1翻译.assets/image-20241223183059376.png)
+
+### Gas Species Mass
+
+如果在 DUMP 行设置 MASS_FILE=T，将生成一个名为 CHID_mass.csv 的文件，其中列出了所有气体种类的总质量与时间的函数关系。默认情况下该标记为 F，因为计算所有网格单元中的所有气体种类非常耗时。参数 DT_MASS 或 RAMP_MASS 可控制输出频率。
+
+### Mass Loss Rates
+
+气体物种在固体表面、固体颗粒或液滴上生成的速率记录在 CHID_hrr.csv 文件中。该文件是自动生成的；与之相关的唯一输入参数是 DUMP 行中的 DT_HRR 和 RAMP_HRR。该文件包含与能量预算（第 22.10.1 节）和用户指定压力区的压力（第 22.10.4 节）相关的量。所有气体种类的生成率均以 kg/s 为单位。
+
+### Zone Pressures
+
+如果指定了压力ZONE（即域中背景压力高于环境压力的特定区域），则每个区域的压力都会列在 CHID_hrr.csv 文件中。
+
+### Visibility and Obscuration
+
+如果使用简单化学方法进行火灾计算，烟雾和所有其他主要燃烧产物都会被跟踪。评估空间能见度最有用的量是光消光系数 K [^69]。通过烟雾 L 距离的单色光的强度会根据以下公式衰减
+$$
+I/I_0=\mathrm{e}^{-KL}
+$$
+光消光系数 K 是质量比消光系数 Km 和烟雾微粒密度 $ρY_S$ 的乘积，前者与燃料有关，后者与烟雾微粒密度 $ρY_S$ 有关。
+$$
+K=K_\mathrm{m}\rho Y_\mathrm{S}\label{22.22}\tag{22.22}
+$$
+第 18.3.7 节、第 18.3.5 节和第 18.3.6 节分别讨论了输出遮蔽率百分比的设备，如数量为 “ASPIRATION”、“CHAMBER OBSCURATION”（烟雾探测器）或 “PATH OBSCURATION”（光束探测器）的 DEVC。
+
+烟雾能见度的估算公式为
+$$
+S=C/K\label{22.23}\tag{22.23}
+$$
+其中，C 是一个非维度常数，是通过烟雾观察物体类型的特征，即发光标志的 C = 8，反光标志的 C = 3 [^69]。由于 K 在域中随点而变，可见度 S 也随之变化。
+
+有三个参数可以控制烟雾的产生和能见度。第一个参数是 REAC 线上的 SOOT_YIELD，定义为在使用简单化学方法时转化为烟尘的燃料质量分数。第二个参数 MASS_EXTINCTION_COEFFICIENT 是公式$\eqref{22.22}$中的 Km。它定义在各种光吸收气体种类的一个或多个 SPEC 线路[^22-5]上。默认值为 8700 m2/kg，该值适用于木材和塑料的火焰燃烧[^22-6]。第三个参数是 MISC 行中的 VISIBILITY_FACTOR，即公式$\eqref{22.23}$中的常数 C。默认值为 3。
+
+气相输出量 “EXTINCTION COEFFICIENT ”为 K。类似的量还有 “OPTICAL DENSITY”，D = K/2.3，这是在定义中使用 log10 的结果。
+$$
+D\equiv-\frac{1}{L}\log_{10}\left(\frac{I}{I_0}\right)=K\log_{10}\mathrm{e}
+$$
+可见度 S 通过名为 “VISIBILITY ”的QUANTITY输出。请注意，默认情况下，能见度与简单化学模型隐式定义的烟雾相关联。不过，也可以通过加入 SPEC_ID 将该量与明确定义的物种相关联。换句话说，您可以指定输出量 “VISIBILITY ”和 SPEC_ID。这并不要求您进行简单的化学计算，只要求您通过单独的 SPEC 行指定给定的物种。您还可以在 SPEC 行中指定一个唯一的 MASS_EXTINCTION_COEFFICIENT。
+
+请注意，FDS 不能报告无穷大的可见度，而是报告一个 MAXIMUM_VISIBILITY（最大可见度），您可以通过 MISC 行进行控制。默认值为 30 米。
+
+### Flame Height and Flame Tilt
+
+火焰高度 “以及某种程度上的 ”火焰倾斜度 "是评估大火危险的常用数据。FDS 并不直接输出这些数值，而是通过设备和控制的组合得出这些数值。举例说明最能说明问题。假设您正在一个高 10 米、网格分辨率为 0.2 米的域中模拟火灾。火灾的中心点是 z = 0 处的 (x,y) = (0,0)。下面的输入行将计算火焰的高度和倾斜度：
+
+```fortran
+&DEVC ID='HRR', Z_ID='z', XBP=0.0,0.0,0.0,0.0,0.1,9.9, QUANTITY='HRRPUV',
+SPATIAL_STATISTIC='VOLUME INTEGRAL', DX=5, DY=5, DZ=0.1, POINTS=100,
+STATISTICS_START=10. /
+&CTRL ID='H', FUNCTION_TYPE='PERCENTILE', INPUT_ID='HRR', PERCENTILE=0.97 /
+&DEVC ID='x_max', XB=-5,5,-5,5,9.0,9.2, QUANTITY='TEMPERATURE',
+SPATIAL_STATISTIC='MAXLOC X' /
+&DEVC ID='y_max', XB=-5,5,-5,5,9.0,9.2, QUANTITY='TEMPERATURE',
+SPATIAL_STATISTIC='MAXLOC Y' /
+&CTRL ID='x2', FUNCTION_TYPE='POWER', INPUT_ID='x_max','CONSTANT', CONSTANT=2 /
+&CTRL ID='y2', FUNCTION_TYPE='POWER', INPUT_ID='y_max','CONSTANT', CONSTANT=2 /
+&CTRL ID='r2', FUNCTION_TYPE='SUM', INPUT_ID='x2','y2' /
+&CTRL ID='r', FUNCTION_TYPE='POWER', INPUT_ID='r2','CONSTANT', CONSTANT=0.5 /
+&CTRL ID='r/9', FUNCTION_TYPE='DIVIDE', INPUT_ID='d','CONSTANT', CONSTANT=9 /
+&CTRL ID='tilt_rad', FUNCTION_TYPE='ATAN', INPUT_ID='r/9' /
+&CTRL ID='tilt_deg', FUNCTION_TYPE='MULTIPLY', INPUT_ID='tilt_rad','CONSTANT',
+CONSTANT=57.296 /
+&CTRL ID='cos_theta', FUNCTION_TYPE='COS', INPUT_ID='tilt_rad' /
+&CTRL ID='L', FUNCTION_TYPE='DIVIDE', INPUT_ID='H','cos_theta' /
+&DEVC ID='L_F', CTRL_ID='L', XYZ=0,0,0, QUANTITY='CONTROL VALUE',
+TEMPORAL_STATISTIC='RUNNING AVERAGE', STATISTICS_START=10, UNITS='m' /
+&DEVC ID='tilt', CTRL_ID='tilt_deg', XYZ=0,0,0, QUANTITY='CONTROL VALUE',
+TEMPORAL_STATISTIC='RUNNING AVERAGE', STATISTICS_START=10, UNITS='deg' /
+```
+
+ID=’HRR’ 在一格厚的水平切片上计算热释放率的垂直阵列。
+
+ID=’H’ 利用函数（'z', 'HRR'），计算在多低的高度上会释放出 97% 的火焰能量。
+
+ID=’x_max’ 求 XB 所定义的体积内最高温度点的 x 坐标。同样求出 y 坐标。
+
+ID=’x2’,’y2’,’r2’,’r’,’r/9’ 确定从原点到最高温度点的径向距离。将此距离除以您找到最高温度点的切片高度，即 z = 9。
+
+ID=’tilt_rad’,’tilt_deg’ 计算 “r/9 ”的反正切，以弧度为单位确定倾斜角。然后将该值转换为度。
+
+ID=’cos_theta’ 计算倾斜角的余弦值。
+
+ID=’L’ 用垂直火焰高度除以倾斜角的余弦值，得出火焰的长度。
+
+ID=’L_F’,’tilt’ 使用运行平均值将火焰长度和倾斜角度打印到设备文件中，以平滑噪声数据。
+
+要更好地理解控制逻辑，请参见第 18.4 节。请特别注意平均时段、启动时间等。在火烟羽稳定之前，不要开始运行平均值。在进行复杂模拟之前，请先在一些简单的情况下进行练习。
+
+****
+
+[^22-5]:在使用简单化学燃烧模型时，可以通过在输入文件中添加以下一行来更改默认的质量消光系数：&SPEC ID='SOOT', MASS_EXTINCTION_COEFFICIENT=..., LUMPED_COMPONENT_ONLY=T / 
+[^22-6]:对于大多数燃烧燃料，在波长为 633 纳米时，Km 的建议值为 8700 m2/kg ± 1100 m2/kg [^70] 。
+
+### Layer Height and the Average Upper and Lower Layer Temperatures
+
+防火工程师经常需要估算燃烧隔间中高温、烟雾弥漫的上层与较低温的下层之间的界面位置。相对简单的火灾模型（通常称为两区模型）会直接计算这一数量以及上层和下层的平均温度。在像 FDS 这样的计算流体动力学（CFD）模型中，并不存在两个截然不同的区域，而是一个连续的温度曲线。尽管如此，还是有一些方法可以根据连续的垂直温度剖面估算层高和平均温度。其中一种方法[^71]如下： 考虑一个连续函数 T(z)，将温度 T 定义为地面 z 以上高度的函数，其中 z = 0 为地面，z = H 为天花板。定义 $T_u$ 为上层温度，$T_l$ 为下层温度，$z_{int} $为界面高度。计算这些量：
+$$
+(H-z_{\mathrm{int}})T_{\mathrm{u}}+z_{\mathrm{int}}T_{\mathrm{l}}=\int_0^HT(z)\mathrm{d}z=I_1
+$$
+
+$$
+(H-z_{\mathrm{int}})\frac{1}{T_{\mathrm{u}}}+z_{\mathrm{int}}\frac{1}{T_{\mathrm{l}}}=\int_0^H\frac{1}{T(z)}\mathrm{d}z=I_2
+$$
+
+求解$z_{int}$：
+$$
+z_{\mathrm{int}}=\frac{T_1(I_1I_2-H^2)}{I_1+I_2T_1^2-2T_1H}
+$$
+设 $T_l$ 为最低网格单元的温度，利用辛普森法则对$ I_1$ 和$ I_2$ 进行数值积分。通过以下方法将 Tu 定义为上层平均温度
+$$
+(H-z_{\mathrm{int}})T_{\mathrm{u}}=\int_{z_{\mathrm{int}}}^{H}T(z)\mathrm{d}z
+$$
+参考文献[^72]对类似程序进行了进一步讨论。
+
+LAYER HEIGHT“、”UPPER TEMPERATURE “和 ”LOWER TEMPERATURE "可以通过输入文件中的 DEVC 行指定。例如
+
+```fortran
+&DEVC XB=2.0,2.0,3.0,3.0,0.0,3.0, QUANTITY='LAYER HEIGHT', ID='whatever' /
+```
+
+产生 x = 2 和 y = 3 处烟雾层高度在 z = 0 和 z = 3 之间的时间历史。
+
+### Thermocouples
+
+输出量 THERMOCOUPLE 是模拟热电偶的温度。热电偶温度滞后于真实气体温度，其滞后量主要取决于热电偶珠的尺寸。热电偶温度 $T_{TC}$ [^73] 的解法如下
+$$
+\frac{D_{\mathrm{TC}}}{6}\rho_{\mathrm{TC}}c_{\mathrm{TC}}\frac{\mathrm{d}T_{\mathrm{TC}}}{\mathrm{d}t}=\varepsilon_{\mathrm{TC}}\left(U/4-\sigma T_{\mathrm{TC}}^4\right)+h(T_{\mathrm{g}}-T_{\mathrm{TC}})\label{22.27}\tag{22.27}
+$$
+其中，$\varepsilon_{\mathrm{TC}}$是热电偶的发射率，U 是综合辐射强度，Tg 是真实气体温度，h 是对小球的传热系数，$h=k\operatorname{Nu}/D_{\mathrm{TC}}$。珠子的直径DIAMETER、发射率EMISSIVITY、密度DENSITY和 SPECIFIC_HEAT 均在相关的 PROP 行中给出。要更改传热系数的计算值，请在 PROP 行中设置 HEAT_TRANSFER_COEFFICIENT （W/(mK)）。微珠直径的默认值为 0.001 m。珠子密度和比热的默认值为镍；分别为 8908 kg/m3 和 0.44 kJ/kg/K。有关小球对流传热的详情，请参阅《技术参考指南》中有关水滴传热的讨论。
+
+上述讨论适用于所谓的 “裸珠 ”热电偶，但热电偶通常以各种方式进行屏蔽或护套，以减轻热辐射的影响。在这种情况下，热电偶没有明显的焊珠直径，结构中可能存在多种金属和空气间隙。通常情况下，制造商会提供一个时间常数，其定义为当传感器突然陷入以 20 米/秒的速度流动的暖气流中时，传感器响应其总输出信号的 63.2% 所需的时间。分析和测试通常在相对较低的温度下进行，在这种情况下，公式$\eqref{22.27}$ 中的辐射项可以忽略，时间常数 $\tau$可以用有效热特性和有效直径来定义：
+$$
+\tau=\frac{D_{\mathrm{eff}}\rho_{\mathrm{eff}}c_{\mathrm{eff}}}{6h}\quad;\quad h=\frac{k\mathrm{Nu}}{D_{\mathrm{eff}}}\quad;\quad\mathrm{Nu}=2+0.6\mathrm{Re}^{1/2}\mathrm{Pr}^{1/3}\quad;\quad\mathrm{Re}=\frac{\rho\|\mathbf{u}\|D_{\mathrm{eff}}}{\mu}\label{22.28}\tag{22.28}
+$$
+对于给定的时间常数$\tau$值和有效热特性，公式$\eqref{22.28}$可以隐式求解有效直径。TIME_CONSTANT 在 PROP 行中指定，DEVC 行使用 PROP_ID 标识该 PROP 行。如果指定了 TIME_CONSTANT，还可以指定有效辐射率EMISSIVITY、密度DENSITY、SPECIFIC_HEAT和热传导系数HEAT_TRANSFER_COEFFICIENT，但不能指定直径DIAMETER，因为这将自动计算。在大多数情况下，只需指定 TIME_CONSTANT 即可。
+
+图 22.5 显示了一个名为热电偶时间常数（thermocouple_time_constant）的简单测试案例的结果，其输入文件位于 Heat_Transfer 样本文件夹中。给定时间常数为 0.5 秒、3.0 秒和 8.0 秒的三个热电偶突然受到 20 米/秒、温度为 30 ◦C 的气流冲击。预计在给定的时间常数下，每个热电偶的温度应达到 26.32 ◦C。
+
+![image-20241223190939857](./../FUG6.9.1翻译.assets/image-20241223190939857.png)
+
+### Volume Flow
+
+与供暖和通风系统有关的一个常见量是体积流量，通常用 $\dot V$表示，单位为 $m^3/s$ 或 $\mathrm{ft}^3/\mathrm{min}$。体积流量输出的指定方式取决于它是在边界还是完全在气相中。
+
+**Volume Flow in the Gas Phase**
+
+考虑气体流经位于 x = x0 处的窗口，其边界为 y1 ≤ y ≤ y2 和 z1 ≤ z ≤ z2。其体积流的计算公式为
+$$
+\dot{V}(t)=\int_{z_1}^{z_2}\int_{y_1}^{y_2}u(x_0,y,z)\mathrm{d}y\mathrm{d}z\approx\sum_{k=k_1}^{k_2}\sum_{j=j_1}^{j_2}u_{ijk}\delta y\delta z
+$$
+要将体积流量指定为输出，请使用类似下面的输入行：
+
+```fortran
+&DEVC ID='Vdot', XB=X0,X0,Y1,Y2,Z1,Z2, QUANTITY='U-VELOCITY',
+SPATIAL_STATISTIC='AREA INTEGRAL' /
+```
+
+这将在 CHID_devc.csv 中生成一列，包含通过窗口的体积流量（立方米/秒）的时间历史。请注意，如果气体沿正坐标方向流动，则体积流量为正。您可以通过在 DEVC 行中添加 CONVERSION_FACTOR=-1 来反转符号。如果希望通过同一窗口区分流入和流出，可使用参数 QUANTITY_RANGE(1:2)设置上限或下限。例如，如果只想记录负坐标方向的体积流量，则设置 QUANTITY_RANGE(2)=0，这意味着速度的正值不计入求和。
+
+**Volume Flow at a Boundary**
+
+要记录固体表面或通风口处的体积流量，请添加如下一行：
+
+```fortran
+&DEVC ID='Vdot', XB=..., QUANTITY='NORMAL VELOCITY', SURF_ID='...',
+SPATIAL_STATISTIC='SURFACE INTEGRAL' /
+```
+
+该行指示 FDS 对 XB 所界体积内任何具有给定 SURF_ID 的表面上的速度法向分量求和。请注意，进入计算域的流量为负值。
+即使您可能只对通过平面的体积流量感兴趣，也请使用 XB 提供实际体积，以确保即使将通风口或障碍物截断到最近的网格单元，积分求和的区域也不会超出您指定的体积限制。
+
+### Mass Flow
+
+质量通量和质量流量有多种输出选项，取决于所需的是气相还是固相数量，以及所需的精度水平。
+
+**Mass Flow in the Gas Phase**
+
+通过位于 x = x0 处、以 y1 ≤ y ≤ y2 和 z1 ≤ z ≤ z2 为界的窗口的气体种类 α 的质量流量由以下公式给出：
+$$
+\dot{m}_\alpha(t)=\int_{z_1}^{z_2}\int_{y_1}^{y_2}\rho Y_\alpha u\mathrm{d}y\mathrm{d}z\approx\sum_{k=k_1}^{k_2}\sum_{j=j_1}^{j_2}\frac{\rho_{ijk}Y_{ijk}+\rho_{i+1,jk}Y_{i+1,jk}}{2}u_{ijk}\delta y\delta z\label{22.30}\tag{22.30}
+$$
+要指示 FDS 输出该数量，请使用输入行：
+
+```fortran
+&DEVC ID='m-dot', XB=x0,x0,y1,y2,z1,z2, QUANTITY='MASS FLUX X', SPEC_ID='ALPHA',
+SPATIAL_STATISTIC='AREA INTEGRAL' /
+```
+
+要将积分限制在正坐标方向或负坐标方向，请将 QUANTITY_RANGE(1) 或 QUANTITY_RANGE(2) 设置为零。如果需要总质量流量，请省略 SPEC_ID。
+
+出于两个原因，“MASS FLUX X ”及其 y 和 z 对应值只是实际计算质量通量的估算值。
+
+1. 这些量使用 FDS 计算的通量限制质量通量项的估计值。请注意，在公式$\eqref{22.30}$ 中，密度 ρ 和质量分数 Yα 是在单元 i jk 的前 x 面用简单平均值近似得到的。实际的离散近似比这更复杂，但这些限制通量的质量通量项通常不会保存在计算例程之外。
+2. 如果指定了 SPEC_ID，公式 $\eqref{22.30}$只表示总质量通量的平流分量。在湍流中，包括湍流扩散在内的扩散分量可能非常重要。
+
+如果您想要更精确的输出，包括质量通量的扩散分量和平流分量的精确通量限制器，请指定 “TOTAL MASS FLUX X”，而不是 “MASS FLUX X”（或 y 坐标或 z 坐标类似值）。如果您想得到各分量的细分，请同时指定 “ADVECTIVE MASS FLUX X ”和 “DIFFUSIVE MASS FLUX X”。注意在单元格的明确位置（即不直接位于单元格面或边界上）指定 XB。如果在单元（I,J,K）中指定 DEVC，通量将从交错网格上的（I+1/2,J,K）面等处报告。
+
+**Mass Flow at a Boundary**
+
+有三个量可以用来记录边界上特定气体种类的质量通量：“MASS FLUX（质量通量）”、“MASS FLUX WALL（质量通量墙）”和 “TOTAL MASS FLUX WALL（总质量通量墙）”。如果需要特定的气体种类，每种输出都需要一个 SPEC_ID；否则就会给出所有气体种类的总和。输出结果之间的区别在于，“MASS FLUX ”指的是气体种类或固体物质成分在固体边界的生成率，无论是用户指定的还是热解模型的结果。另一方面，“MASS FLUX WALL ”是实际计算的质量通量，由于固体壁面速度法向分量的数值误差较小，可能与 “MASS FLUX ”略有不同。也就是说，“MASS FLUX WALL ”是对 “MASS FLUX ”的直接计算。
+$$
+
+$$
+其中 $\mathbf{n}$ 是表面的法线方向。第三个质量通量输出选项称为 “总质量通量墙（TOTAL MASS FLUX WALL）”。这个量与 “MASS FLUX WALL ”非常相似，只是它结合了单个时间步长内的预测质量通量和修正质量通量。它是气相量 “TOTAL MASS FLUX X/Y/Z ”的边界类似量。
+
+对于每种形式的边界质量通量，正值意味着质量正在进入计算域。这些量可应用于固体表面或通风口。MASS FLUX WALL和TOTAL MASS FLUX WALL也可应用于OPEN边界。
+
+为了说明这些不同形式的质量通量输出之间的区别，请看图 22.6。这些图显示了来自固体表面的气体空间综合质量通量，其中质量通量在 10 秒内线性上升，20 秒内保持稳定，然后在 10 秒内线性下降到零。MASS FLUX "输出只是模拟这一指定曲线。MASS FLUX WALL “和 ”TOTAL MASS FLUX WALL "输出会出现波动，原因是质量通量并没有完全作用于固体表面--边界处不精确的速度-压力耦合导致速度的法向分量出现微小波动。这些波动很小，平均值接近指定值，但有时使用更精确的输出量进行诊断是有用的。
+
+![image-20241223192452551](./../FUG6.9.1翻译.assets/image-20241223192452551.png)
+
+### Enthalpy Flow
+
+**Enthalpy Flow in the Gas Phase**
+
+位于 x = x0 处、以 y1 ≤ y ≤ y2 和 z1 ≤ z ≤ z2 为边界的窗口的焓流由以下公式给出：
+$$
+\begin{aligned}\dot{q}(t)&=\int_{z_{1}}^{z_{2}}\int_{y_{1}}^{y_{2}}\left[\rho\left(h_{\mathrm{s}}(T)-h_{\mathrm{s}}(T_{\infty})\right)u-k\frac{\partial T}{\partial x}\right]\mathrm{d}y\mathrm{d}z\approx\\&\sum_{k=k_1}^{k_2}\sum_{j=j_1}^{j_2}\left[\rho_{i+\frac{1}{2},jk}\left(h_\mathrm{s}(T_{i+\frac{1}{2},jk})-h_\mathrm{s}(T_\infty)\right)u_{ijk}-k_{ijk}\frac{T_{i+1,jk}-T_{ijk}}{\delta x}\right]\delta y\delta z\end{aligned}
+$$
+要指示 FDS 输出该量，请使用输入行：
+
+```fortran
+&DEVC ID='q-dot', XB=x0,x0,y1,y2,z1,z2, QUANTITY='ENTHALPY FLUX X',
+SPATIAL_STATISTIC='AREA INTEGRAL' /
+```
+
+**Enthalpy Flow at a Boundary**
+
+ENTHALPY FLUX WALL “相当于边界上的 ”ENTHALPY FLUX X/Y/Z"。它是在通风口或开放边界处吸入域中的能量速率：
+$$
+\dot{q}_\mathrm{w}^{\prime\prime}=-\rho_\mathrm{w}h_s(T_\mathrm{w})\mathbf{u}\cdot\mathbf{n}-k\frac{\partial T}{\partial n}
+$$
+其中 n 是指向边界（即计算域外）的坐标方向。需要注意的是，边界处的焓通量是使用边界处气体混合物的密度、温度和显焓来定义的，而不是像气相焓通量那样相对于环境条件。因此，这个量通常用于能量预算计算，以跟踪焓流入和流出计算域的情况。气体流入计算域时，焓值为正。
+
+### Heat Flux
+
+有多种输出量与固体表面的热暴露有关。
+
+’TOTAL HEAT FLUX’
+
+​	固体表面吸收辐射和对流能量的速率：
+$$
+\dot{q}_\mathrm{tot}^{\prime\prime}=\varepsilon_\mathrm{s}\left(\dot{q}_\mathrm{inc}^{\prime\prime}-\sigma T_\mathrm{s}^4\right)+h_\mathrm{c}\left(T_\mathrm{g}-T_\mathrm{s}\right)\label{22.34}\tag{22.34}
+$$
+​	式中$\dot{q}_{\mathrm{inc}}^{\prime\prime}$为入射辐射热流量，$\varepsilon_{\mathrm{s}}$ 为表面发射率，hc 为对流传热系数，Ts 为表面温度，Tg 为表面附近的气体温度。对流传热系数由 FDS 根据指定的表面特性和计算得出的近边界流特性计算得出。
+
+’RADIATIVE HEAT FLUX’
+
+​	这就是公式 $\eqref{22.34}$ 中的净辐射成分，$\dot{q}_\mathrm{r}^{\prime\prime}=\varepsilon_\mathrm{s}\left(\dot{q}_\mathrm{inc}^{\prime\prime}-\sigma T_\mathrm{s}^4\right)$
+
+’CONVECTIVE HEAT FLUX’
+
+​	这就是公式 $\eqref{22.34}$中的对流成分，$\dot{q}_{\mathfrak{c}}^{\prime\prime}=h_{\mathfrak{c}}(T_{\mathfrak{g}}-T_{\mathfrak{s}})$
+
+’CONVECTIVE HEAT FLUX GAUGE’
+
+​	这就是公式$\eqref{22.35}$中的对流成分，$\dot{q}_{\mathrm{c,gauge}}^{\prime\prime}=h_{\mathrm{c}}(T_{\mathrm{g}}-T_{\mathrm{gauge}})$
+
+’INCIDENT HEAT FLUX’
+
+​	这是式$\eqref{22.34}$的$\dot{q}_{\mathrm{inc}}^{\prime\prime}$项。
+
+’GAUGE HEAT FLUX’
+
+​	这一数值模拟的是使用水冷式热通量计进行的测量：
+$$
+\dot{q}_{\mathrm{gauge}}^{\prime\prime}=\varepsilon_{\mathrm{gauge}}\left(\dot{q}_{\mathrm{inc}}^{\prime\prime}-\sigma T_{\mathrm{gauge}}^4\right)+h_{\mathrm{c}}\left(T_{\mathrm{g}}-T_{\mathrm{gauge}}\right)\label{22.35}\tag{22.35}
+$$
+​	如果实验中使用的热通量计的温度不是环境温度或发射率不是 1，则应在与设备相关的 PROP 行中指定 GAUGE_TEMPERATURE (Tgauge，◦C) 和 GAUGE_EMISSIVITY (εgauge)：
+
+```fortran
+&DEVC ID='hf', XYZ=..., IOR=-2, QUANTITY='GAUGE HEAT FLUX', PROP_ID='hfp' /
+&PROP ID='hfp', GAUGE_TEMPERATURE=80., GAUGE_EMISSIVITY=0.9 /
+```
+
+​	默认情况下，公式$\eqref{22.35}$中的传热系数 hc 是根据指定的表面属性和周围流场特征在设备所连接的固体表面计算得出的。不过，您也可以在 PROP 行中为测量仪指定一个固定的 HEAT_TRANSFER_COEFFICIENT (W/(m2-K)) 值。
+
+’GAUGE HEAT FLUX GAS’
+
+​	该量与 “GAUGE HEAT FLUX ”相同，但它可以位于计算域内的任何位置，而不仅仅是固体表面。它还有一个任意的ORIENTATION矢量，可以指向任何需要的方向，就像热通量计一样。ORIENTATION矢量无需进行归一化处理，如下所示：
+
+```fortran
+&DEVC ID='hf', QUANTITY='GAUGE HEAT FLUX GAS', XYZ=..., ORIENTATION=-1,1,0/
+```
+
+​	需要注意的是，参数 SPATIAL_STATISTIC 不适用于该量，这意味着您无法在平面或体积上对该量进行积分。不过，您可以使用参数 POINTS 创建这些设备的一维阵列（见第 22.2.5 节）。此外，热通量的对流分量是根据以下假设计算的：虚拟目标是与ORIENTATION矢量法线平行的平板，传热系数是不受虚拟装置影响的局部气体温度和速度的函数。或者，您也可以在 PROP 行中指定 HEAT_TRANSFER_COEFFICIENT，其 ID 在 DEVC 行中指定。
+
+’RADIOMETER’
+
+​	与水冷式热通量计类似，只是这个量只测量净辐射分量：
+$$
+\dot{q}_{\text{radiometer}}^{\prime\prime}=\varepsilon_{\mathrm{gauge}}(\dot{q}_{\mathrm{inc}}^{\prime\prime}-\sigma T_{\mathrm{gauge}}^4)
+$$
+​	GAUGE_TEMPERATURE (Tgauge, ◦C) 和 GAUGE_EMISSIVITY (εgauge) 的值如果分别不同于常温和 1，则可在与设备相关的 PROP 行上进行设置。
+
+​	RADIOMETER是基于 Nils-Erik Gunners 首次提出的椭圆形辐照度计概念，并在参考文献[^74]中进行了描述。这种装置的目的是消除测量中的对流影响。
+
+’RADIOMETER GAS’
+
+​	该输出量与上述 “RADIOMETER ”相同，但它可以位于计算域内的任何位置，而不仅仅是实体表面。它还有一个任意的ORIENTATION矢量，可以指向任何需要的ORIENTATION，就像热通量计一样。方向矢量无需进行归一化处理，如下所示：
+
+```fortran
+&DEVC ID='hf', QUANTITY='RADIOMETER GAS', XYZ=..., ORIENTATION=-1,1,0/
+```
+
+​	需要注意的是，参数 SPATIAL_STATISTIC 不适用于该量，这意味着您无法在平面或体积上对该量进行积分。不过，您可以使用参数 POINTS 创建这些设备的一维数组（见第 22.2.5 节）。
+
+’RADIATIVE HEAT FLUX GAS’
+
+​	该输出量与上述 “RADIATIVE HEAT FLUX ”相同，但它可以位于计算域内的任何位置，而不仅仅是固体表面。它还有一个任意的ORIENTATION矢量，可以指向任何需要的ORIENTATION，就像热通量计一样。方向矢量无需进行归一化处理，如下所示：
+
+```fortran
+&DEVC ID='hf', QUANTITY='RADIATIVE HEAT FLUX GAS', XYZ=..., ORIENTATION=-1,1,0/
+```
+
+需要注意的是，参数 SPATIAL_STATISTIC 不适用于该量，这意味着您无法在平面或体积上对该量进行积分。不过，您可以使用参数 POINTS 创建这些设备的一维数组（见第 22.2.5 节）。
+
+’RADIANCE’
+
+​	这是点 $\mathbf{x}$ 和方向角$\mathbf{s}$ 处辐射强度的术语，所有光谱波段的总和：
+$$
+I(\mathbf{x},\mathbf{s})=\sum_{n=1}^NI_n(\mathbf{x},\mathbf{s})
+$$
+该输出量的指定方式与 “RADIATIVE HEAT FLUX GAS ”类似，即在 XYZ 点放置一个替代目标粒子，其ORIENTATION矢量指向任何所需的方向。
+
+```fortran
+&DEVC ID='rad2', QUANTITY='RADIANCE', XYZ=..., ORIENTATION=-1,0,0 /
+```
+
+’RADIANCE’的单位是$\mathrm{kW/m^2/sr}$
+
+对于以 GAS 结尾的 QUANTITY 类型，可使用 PROP 上的 VIEW_ANGLE 设置设备辐射组件的视角。墙壁设备只能有 180°的视角。
+
+### Adiabatic Surface Temperature
+
+FDS 包括绝热表面温度 (AST) 的计算，这是表示固体表面热暴露的一种方法。根据 Ulf Wickström [^75]提出的想法，TAST 是公式$\eqref{22.34}$ 所定义的总热流量为零时的表面温度。下式可以用 Malendowski [^76] 给出的解析解求解：
+$$
+\varepsilon_\mathrm{s}\left(\dot{q}_\mathrm{inc}^{\prime\prime}-\sigma T_\mathrm{AST}^4\right)+h_\mathrm{c}\left(T_\mathrm{g}-T_\mathrm{AST}\right)=0
+$$
+其中，$\dot q_{inc}^{\prime\prime}$是表面入射辐射热流量，$\varepsilon_s$是表面发射率，hc 是对流传热系数，Tg 是周围气体温度。
+
+若要在固体表面的一个点上输出 AST，请加入以下装置：
+
+```fortran
+&DEVC ID='AST', XYZ=..., IOR=..., QUANTITY='ADIABATIC SURFACE TEMPERATURE' /
+```
+
+请注意，IOR 指定了曲面的方向。要在所有实体表面上绘制 AST 的等高线图，请加入如下边界文件：
+
+```fortran
+&BNDF QUANTITY='ADIABATIC SURFACE TEMPERATURE' /
+```
+
+AST 的作用在于它代表了一个有效的暴露温度，可以传递给更详细的固体物体模型。它提供了单一数量的气相热边界条件，并且不受 FDS 中与固相热传导模型相关的不确定性的影响。显然，向更详细的模型传递信息的目的是获得比 FDS 所能提供的更好的固体温度预测（以及最终的机械响应）。为了强化这一概念，即使模型中没有实际的固体表面，您也可以通过以下几行输出绝热表面温度：
+
+```fortran
+&DEVC ID='AST', XYZ=..., QUANTITY='ADIABATIC SURFACE TEMPERATURE GAS',
+ORIENTATION=0.707,0.0,0.707, PROP_ID='props' /
+&PROP ID='props', EMISSIVITY=0.9, HEAT_TRANSFER_COEFFICIENT=10. /
+```
+
+该输出显示了在给定位置 XYZ 上可达到的最高固体表面温度，该位置实际上不在任何固体表面附近，朝向任何方向，如 ORIENTATION 向量所示。请注意，您必须在 PROP 行设置EMISSIVITY和 HEAT_TRANSFER_COEFFICIENT (W/(m2-K))，因为没有实际的固体表面可用于推断这些值。事实上，FDS 创建了一个拉格朗日粒子，在所需位置记录 AST。FDS 创建 INIT 行来定位粒子。如果您想在这一点上输出与 AST 相关的其他量，可以在同一位置创建另一个 DEVC，并使用 INIT_ID 来确定 ADIABATIC SURFACE TEMPERATURE 的 DEVC 行。例如，您可以输出计算 AST 时使用的传热系数如下：
+
+```fortran
+&DEVC ID='AST', XYZ=..., QUANTITY='ADIABATIC SURFACE TEMPERATURE GAS', ... /
+&DEVC ID='HTC', XYZ=..., QUANTITY='HEAT TRANSFER COEFFICIENT', INIT_ID='AST' /
+```
+
+**Example: AST vs. Surface Temperature**
+
+辐射文件夹中名为 adiabatic_surface_temperature.fds 的测试用例模拟了 0.1 毫米钢板被热羽流加热的情况。钢板完全隔热（SURF 行上的 BACKING='INSULATED'），其稳态温度应等同于绝热表面温度或 AST。图 22.7 的左图显示了平板温度向 AST 上升的过程，与实际的平板温度计一样。右图简单地显示了通过板表面的 DEVC 使用QUANTITY ’ADIABATIC SURFACE TEMPERATURE’计算得出的 AST，以及通过板前方的 DEVC 使用 QUANTITY ’ADIABATIC SURFACE TEMPERATURE GAS’计算得出的 AST。后一种装置的目的是记录 AST，即使模拟中实际上没有板。要使这两个 AST 记录完全相同，板表面条件和 AST 气体参数必须包含相同的明确定义的 HEAT_TRANSFER_COEFFICIENT 和 EMISSIVITY。
+
+![image-20241223195818475](./../FUG6.9.1翻译.assets/image-20241223195818475.png)
+
+### Extracting Detailed Radiation Data
+
+FDS 采用有限体积法求解辐射传输方程 (RTE)，其中辐射强度是通过离散的实体角度计算得出的。由于默认情况下大约有 100 个角度，因此特定角度的辐射强度值不会保存在气相单元中，只会保存在边界处。不过，有一种方法可以将这些值保存到文件中，这对于将数据传输到另一个模型或诊断 RTE 的问题可能很有用。这种形式的输出只适用于使用默认的灰色气体辐射模型，而不是窄带模型。
+
+数据通过一个或多个表格输入行保存在矩形单元格块内：
+
+```fortran
+&RADF XB=..., I_STEP=2, J_STEP=3, K_STEP=1 /
+```
+
+这一行指示 FDS 写出以 XB 为边界的每个单元的辐射强度 $I_{ijk}^{l}\mathrm{(W/m^{2}/sr)}$，以及每个实体角 l 的辐射强度。您可以使用参数 I_STEP、J_STEP 和 K_STEP（默认值均为 1）跳过单元格。每隔 DT_RADF s 打印一次。时间间隔 DT_RADF 没有默认值，必须设置。
+
+每个输出文件都是文本格式，而非二进制格式（例如 CHID_radf_n.txt）。文件格式如图 22.8 所示。NSTEPS 是写出数据的次数。NP 是输入文件 RADF 行中 XB 指定区块内的点数。XYZ_INTENSITIES 是 NP 点的坐标。NI 是实体角的个数，列在 XYZ_DIRECTIONS 下。方向矢量是离散化实体角矢量 ($D_x^l,D_y^l,D_z^l$) 的归一化形式，在《FDS 技术参考指南》第 1 卷[^29]辐射章节中有所描述。
+
+每TIME写出强度时，指定区块中的每个单元都会列出以K为单位的温度、一个占位值 0，然后是以$\mathrm{W/m^{2}/sr}$ 为单位的 NI 实心角处的强度。
+
+![image-20241223213024823](./../FUG6.9.1翻译.assets/image-20241223213024823.png)
+
+### Flame Temperature
+
+输出量 “TEMPERATURE ”报告气相网格单元内的平均气体温度。在典型的火灾模拟中，网格单元内的燃烧发生在网格上无法解析的火焰片上。由于辐射传输方程中的源项是气体温度四次幂的函数，因此燃烧发生的单元格内的温度会被赋予一个有效值，从而达到用户指定的 RADIATIVE_FRACTION 值。输出量 “EFFECTIVE FLAME TEMPERATURE”显示了这一修改后的温度。
+
+不应将这一数值视为绝热火焰温度。详情见第 14.1.3 节。
+
+### Detailed Spray Properties
+
+使用相位多普勒粒子分析法（PDPA）对喷雾[^22-7]进行的详细实验测量可提供有关液滴大小分布、速度和浓度的信息。通过 DEVC 线路可定义一种特殊的设备类型，以模拟 PDPA 测量。要测量的实际数量和测量细节通过相关的 PROP 线路进行定义。
+
+默认情况下，PDPA 设备在 t 时刻的输出计算为时间积分
+$$
+F(t)=\frac{1}{\min(t,t_\mathrm{e})-t_\mathrm{s}}\int_{t_\mathrm{s}}^{\min(t,t_\mathrm{e})}f(t)\mathrm{~d}t
+$$
+但瞬时值可通过在相应的 PROP 行上设置 PDPA_INTEGRATE 等于 F 来获得，在这种情况下F(t)=f(t)
+$$
+F(t)=f(t)
+$$
+函数 f (t) 有两种形式：
+$$
+f_1(t)=\left(\frac{\sum_in_iD_i^m\phi}{\sum_in_iD_i^n}\right)^{\frac{1}{m-n}};\quad f_2(t)=\frac{\sum_in_i\phi}{V}
+$$
+其中，ni 是单个模拟粒子所代表的真实粒子数，Di 是粒子直径，$\phi$ 是要测量的量。在每种情况下，求和都是以设备 XYZ 给出的位置为中心、半径为 PDPA_RADIUS 的球体内的所有粒子。
+
+第一种形式 $f_1(t) $用于计算各种平均直径，相关属性使用 PROP 行的以下关键字定义：
+
+PDPA_M m，直径的指数 m。
+
+PDPA_N 直径的指数 n。如果 m = n，则去掉公式中的指数 1/（m-n）。
+
+第二种形式（$f_2(t)$）用于计算不包括直径加权的质量和能量相关变量。浓度基于 PDPA_RADIUS 定义的采样体积 V。可以使用关键字 QUANTITY 来选择用于 x 的量。表 22.2 列出了可用的 PDPA 量。
+
+还可以输出 PDPA 输出量的直方图。当 PROP 行的 HISTOGRAM 设置为 T 时，与该 PROP 行相关的所有设备的归一化直方图分位数将输出到一个逗号分隔值（.csv）文件中。直方图的分位数和限值由 PROP 行的参数控制。创建直方图时使用的值是 $D_i^m\phi$。 请注意，在绘制直径直方图时，限值必须以米而不是微米为单位。超出直方图限值的值将包含在第一和最后一格的计数中。通过在 PROP 行设置 HISTOGRAM_CUMULATIVE=T，可以输出累积分布。要输出未归一化的计数或累积分布，可将 HISTOGRAM_NORMALIZE 设置为 F。但请注意，计数对应的是超级液滴/粒子，而不是数值液滴/粒子。由于使用了分层抽样技术（见第 15.3.3 节），计数不一定是整数。
+
+<center>Table 22.2: Output quantities available for PDPA.</center>
+
+![image-20241223213855389](./../FUG6.9.1翻译.assets/image-20241223213855389.png)
+
+每个设备的直方图输出文件包含两列。第一列给出分区中心，第二列给出相对频率。通过将 PROP 行的 PDPA_N 参数分别设置为 3 和 2，可以输出基于体积和面积的分布。请注意，这与基于 PDPA_M 参数加权的平均直径计算不同。
+
+PDPA 设备的属性是通过 PROP 行中的以下关键字定义的：
+
+PART_ID 限制计算的粒子群名称。若要计算所有粒子，请勿指定。
+
+PDPA_START ts，时间积分的起始时间，以秒为单位。PDPA 输出始终是一段时间内的运行平均值。由于喷雾模拟可能包含一些初始瞬态阶段，因此指定数据收集的起始时间可能非常有用。
+
+PDPA_END te，时间积分的结束时间，以秒为单位。
+
+PDPA_INTEGRATE 用于选择时间积分值或瞬时值的逻辑参数。默认为 T。
+
+PDPA_RADIUS 以设备位置为中心的球体半径（米），在球体内监测粒子。
+
+PDPA_NORMALIZE 可将 F 设为 $f_2(t) $公式中的 V = 1。
+
+QUANTITY 在 PROP 行中指定，用于选择变量 $\phi$。
+
+HISTOGRAM_NBINS 直方图使用的分段数。
+
+下面的示例用于测量 “water drops ”类型粒子的萨特平均直径 $D_{32}$，测量时间从 5 秒开始。
+
+```fortran
+&PROP ID='pdpa_d32'
+PART_ID='water drops'
+PDPA_M=3
+PDPA_N=2
+PDPA_RADIUS=0.01
+PDPA_START=5. /
+&DEVC XYZ=0.0,0.0,1.0, QUANTITY='PDPA', PROP_ID='pdpa_d32' /
+```
+
+下面的示例使用 0 到 2000 μm 之间 20 个大小相同的分区来绘制液滴大小的直方图。
+
+```fortran
+&PROP ID='pdpa_d'
+PART_ID='water drops'
+QUANTITY="DIAMETER"
+PDPA_RADIUS=0.01
+PDPA_START=0.0
+PDPA_M=1
+HISTOGRAM=T
+HISTOGRAM_NBINS=20
+HISTOGRAM_LIMITS=0,2000E-6 /
+&DEVC XYZ=0.0,0.0,1.0, QUANTITY='PDPA', PROP_ID='pdpa_d' /
+```
+
+
+
+****
+
+[^22-7]:PDPA "输出量通常适用于液滴。不过，它们也可用于固体颗粒。
+
+### Output Associated with Thermogravimetric Analysis (TGA)
+
+除了轮廓（PROF）输出外，还有各种用于监测反应表面的附加量。例如，“WALL THICKNESS ”给出了固体表面元素的总厚度。表面密度 "给出了固体表面元素的单位面积总质量，计算方法是材料密度对壁厚的积分。这两个量都有 DEVC 和 BNDF 两种形式。对于 “SURFACE DENSITY（表面密度）”量，您可以添加一个 MATL_ID，以获得固体材料单个成分的表面密度。
+
+**Thermogravimetric Analysis (TGA) Output**
+
+热重分析或 TGA 是一种台式测量方法，它以恒定的速率加热很小的固体材料样品。TGA 测量结果以归一化质量和归一化质量损失率的形式呈现。FDS 可以输出类似的数量：
+$$
+\begin{aligned}\prime\text{ NORMALIZED MASS}\prime&\quad=\quad\sum_{\alpha}m_{\alpha}^{\prime\prime}(t)/\sum_{\alpha}m_{\alpha}^{\prime\prime}(0)&\quad\text{(dimensionless)}\\\prime\text{NORMALIZED MASS LOSS RATE}\prime&\quad=\quad\sum_{\alpha}\dot{m}_{\alpha}^{\prime\prime}(t)/\sum_{\alpha}m_{\alpha}^{\prime\prime}(0)&\quad\mathrm{(1/s)}\end{aligned}
+$$
+对于这两个量，可以添加一个 MATL_ID，得到固体材料中单一成分的归一化质量或质量损失率 $m_\alpha^{\prime\prime}(t)/\sum_\alpha m_\alpha^{\prime\prime}(0)$。
+
+**Micro-Combustion Calorimetry (MCC) Output**
+
+微量燃烧量热法（MCC）与 TGA 相似，只是蒸发的气体是燃烧的。结果是归一化的热释放率：
+$$
+\text{'NORMALIZED HEAT RELEASE RATE'}=\dot{m}_{f}^{\prime\prime}(t)\Delta H/\sum_{\alpha}m_{\alpha}^{\prime\prime}(0)\quad(\mathrm{W/g})
+$$
+请注意，$\dot{m}_\mathrm{F}^{\prime\prime}$ 是燃料的质量通量，ΔH 是燃烧热。
+
+**Differential Scanning Calorimetry (DSC) Output**
+
+差示扫描量热法或 DSC 是一种在持续加热条件下测量小材料样品吸热率的方法。其结果是归一化吸热率：
+$$
+\text{'NORMALIZED HEATING RATE' }=\dot{q}_{\mathrm{c}}^{\prime\prime}(t)/\sum_{\alpha}m_{\alpha}^{\prime\prime}(0)\quad\mathrm{(W/g)}
+$$
+请注意，假设样品纯粹通过对流加热，在这种情况下，$\dot{q}_{\mathrm{c}}^{\prime\prime}$就是对流热通量。
+
+### Fractional Effective Dose (FED) and Fractional Irritant Concentration (FIC)
+
+分数有效剂量指数（FED）由 Purser [^77]提出，**是衡量燃烧气体导致人类丧失能力的常用指标**。FED 值的计算公式为
+$$
+\mathrm{FED_{tot}=(FED_{CO}+FED_{CN}+FED_{NO_x}+FLD_{irr})\times HV_{CO_2}+FED_{O_2}}
+$$
+一氧化碳致死剂量的计算公式为
+$$
+\mathrm{FED}_{\mathrm{CO}}=\int_0^t2.764\times10^{-5}\left(C_{\mathrm{CO}}(t)\right)^{1.036}\mathrm{d}t
+$$
+其中，t 为时间（分钟），$C_{CO}$ 为 CO 浓度（ppm）。氯化萘CN致死剂量的计算公式为
+$$
+\mathrm{FED}_{\mathrm{CN}}=\int_0^t\left(\frac{1}{220}\exp\left(\frac{C_{\mathrm{CN}}(t)}{43}\right)-0.0045\right)\mathrm{d}t
+$$
+其中，t 为时间（分钟），$C_{CN}$ 为根据二氧化氮的保护作用修正后的 HCN 浓度（ppm）。$C_{CN}$ 的计算公式为
+$$
+C_{\mathrm{CN}}=C_{\mathrm{HCN}}-C_{\mathrm{NO}_2}-C_{\mathrm{NO}}
+$$
+$NO_x$致死剂量的计算公式为
+$$
+\mathrm{FED}_{\mathrm{NO}_x}=\int_0^t\frac{C_{\mathrm{NO}_x}(t)}{1500}\mathrm{~d}t
+$$
+其中，t 为时间（分钟），$C_{NO_x}$ 为 NO 和 NO2 的浓度总和（ppm）。
+
+刺激性物质的致死分量（FLD）计算公式为
+$$
+\mathrm{FLD}_{\mathrm{irr}}=\int_0^t\left(\frac{C_{\mathrm{HCl}}(t)}{F_{\mathrm{FLD,HCl}}}+\frac{C_{\mathrm{HBr}}(t)}{F_{\mathrm{FLD,HBr}}}+\frac{C_{\mathrm{HF}}(t)}{F_{\mathrm{FLD,HF}}}+\frac{C_{\mathrm{SO}_2}(t)}{F_{\mathrm{FLD,SO}_2}}+\frac{C_{\mathrm{NO}_2}(t)}{F_{\mathrm{FLD,NO}_2}}+\frac{C_{\mathrm{C_3H_4O}}(t)}{F_{\mathrm{FLD,C_3H_4O}}}+\frac{C_{\mathrm{CH_2O}}(t)}{F_{\mathrm{FLD,CH_2O}}}\right)\mathrm{~d}t
+$$
+其中，t 是以分钟为单位的时间，代号是每种刺激物的瞬时浓度（ppm），分母是预测对一半人口致死的各种刺激物的暴露剂量。表 22.3 列出了致死接触剂量 [^77]。若要包括表中未列出的刺激性气体的影响，应使用相应 SPEC 行的 FLD_LETHAL_DOSE 属性以 ppm×min 为单位指定 $F_{FLD}$。
+
+低氧缺氧致死剂量的计算公式为
+$$
+\mathrm{FED}_{\mathrm{O}_2}=\int_0^t\frac{\mathrm{d}t}{\exp\left[8.13-0.54\left(20.9-C_{\mathrm{O}_2}(t)\right)\right]}
+$$
+
+<center>Table 22.3: Coefficients used for the computation of irritant effects of gases.</center>
+
+![image-20241223215807907](./../FUG6.9.1翻译.assets/image-20241223215807907.png)
+
+其中，t 为时间（分钟），$C_{O2} $为氧气浓度（体积百分比）。二氧化碳诱发的过度换气因子计算公式为
+$$
+\mathrm{HV}_{\mathrm{CO}_2}=\frac{\exp(0.1903C_{\mathrm{CO}_2}(t)+2.0004)}{7.1}
+$$
+其中，t 为时间（分钟），$C_{CO2}$ 为二氧化碳浓度（百分比）。
+
+分数刺激物浓度 (FIC) 也是由 Purser [^77]提出的，表示取决于刺激物直接浓度的毒性效应。总体刺激物浓度 FIC 的计算公式为
+$$
+\mathrm{FIC}_{\mathrm{irr}}=\frac{C_{\mathrm{HCl}}(t)}{F_{\mathrm{FIC,HCl}}}+\frac{C_{\mathrm{HBr}}(t)}{F_{\mathrm{FIC,HBr}}}+\frac{C_{\mathrm{HF}}(t)}{F_{\mathrm{FIC,HF}}}+\frac{C_{\mathrm{SO}_{2}}(t)}{F_{\mathrm{FIC,SO}_{2}}}+\frac{C_{\mathrm{NO}_{2}}(t)}{F_{\mathrm{FIC,NO}_{2}}}+\frac{C_{\mathrm{C_{3}H_{4}O}}(t)}{F_{\mathrm{FIC,C_{3}H_{4}O}}}+\frac{C_{\mathrm{CH_{2}O}}(t)}{F_{\mathrm{FIC,CH_{2}O}}}
+$$
+其中，代号为每种刺激物的瞬时浓度，分母为预计会导致半数人口丧失能力的各刺激物浓度。表 22.3 给出了丧失能力的浓度 [^77]。若要包含表中未列出的气体的刺激效应，应使用相应 SPEC 行上的 FIC_CONCENTRATION 属性指定 $F_{FIC}$（单位为 ppm）。
+
+输出量 FED 和 FIC 可以通过设备在一个点上显示：
+
+```fortran
+&DEVC ID='whatever', XYZ=..., QUANTITY='FED', PROP_ID='Activity Level' /
+```
+
+您还可以将 FIC 可视化为等高线切片。输出量 FED 不能直接作为等高线切片输出，但如果在同一平面内定义了 O2、CO2 和 CO 的切片，则可以在 Smokeview 中将其可视化为切片：
+
+```fortran
+&SLCF PBY=1.0, QUANTITY='VOLUME FRACTION', SPEC_ID='CARBON DIOXIDE' /
+&SLCF PBY=1.0, QUANTITY='VOLUME FRACTION', SPEC_ID='CARBON MONOXIDE' /
+&SLCF PBY=1.0, QUANTITY='VOLUME FRACTION', SPEC_ID='OXYGEN' /
+```
+
+请注意，所有切片都定义在同一平面上。如果存在这些切片，Smokeview 就可以计算 FED 并将其显示为等高线切片。
+还请注意，FED 的设备输出可以使用在属性线上定义的可选活动水平：
+
+```fortran
+&PROP ID='Activity Level', FED_ACTIVITY=3 /
+```
+
+参数 FED_ACTIVITY 是一个整数，表示该人处于休息状态（1）、从事轻体力劳动（2）或从事重体力劳动（3）。默认值为 2。
+
+### Histograms
+
+有时，编制各种输出量的概率分布函数 (PDF) 或直方图非常有用。例如，假设您正在监测两个地点的温度，除了时间历程图外，您还需要 PDF。请执行以下操作
+
+```fortran
+&DEVC XYZ=..., QUANTITY='TEMPERATURE', ID='T_1', PROP_ID='hist', HIDE_COORDINATES=F /
+&DEVC XYZ=..., QUANTITY='TEMPERATURE', ID='T_2', PROP_ID='hist', HIDE_COORDINATES=T /
+&PROP ID='hist'
+HISTOGRAM=T
+HISTOGRAM_NBINS=200
+HISTOGRAM_LIMITS=0,2000
+HISTOGRAM_CUMULATIVE=F
+HISTOGRAM_NORMALIZE=T /
+```
+
+当 PROP 行中的 HISTOGRAM 设置为 T 时，归一化直方图分位数将输出到一个逗号分隔值文件 (CHID_hist.csv)。参数 HISTOGRAM_NBINS 是除以数量范围 HISTOGRAM_LIMITS 的分位数。超出直方图限值的值将包含在第一个和最后一个箱的计数中。通过设置 HISTOGRAM_CUMULATIVE=T，可以输出累积分布。要输出非标准化计数或累积分布，请设置 HISTOGRAM_NORMALIZE=F。
+
+每个设备的直方图输出文件包含两列。第一列给出二进制中心，第二列给出相对频率。当多个设备使用同一组直方图参数时，参数 HIDE_COORDINATES 可以方便地抑制第一列的重复输入。
+
+### Complex Terrain and Related Quantities
+
+风和野地火灾模拟中的复杂地形可以通过使用沉浸边界 GEOMetry 生成。在复杂地形上或其正上方可视化输出数据有几种不同的方法。
+
+第一种方法是通过符合地形的 “切片 ”文件。下面一行说明了如何操作：
+
+```fortran
+&SLCF AGL_SLICE=10., QUANTITY='TEMPERATURE' /
+```
+
+不指定绘制气体温度等值线的平面，而是指定等值线位于地面以上 10 米处（AGL）。添加 VECTOR=T 可增加显示速度矢量的选项。
+
+可视化复杂地形数据的第二种方法是通过边界 (BNDF) 文件。像通常一样指定固相输出量，例如
+
+```fortran
+&BNDF QUANTITY='WALL TEMPERATURE' /
+```
+
+您还可以通过 MISC 行中的 TERRAIN_IMAGE，指定一个图像文件（.png）来叠加到地形上。
+
+### Wind and the Pressure Coefficient
+
+在风能工程领域，一个常用的量被称为压力系数（PRESSURE_COEFFICIENT）：
+$$
+C_p=\frac{p-p_\infty}{\frac{1}{2}\rho_\infty U^2}
+$$
+$p_{\infty}$是环境压力或 “自由流 ”压力，$\rho_{\infty}$是环境密度。参数 U 是自由流风速，在 PROP 行中以 CHARACTERISTIC_VELOCITY 表示
+
+```fortran
+&BNDF QUANTITY='PRESSURE COEFFICIENT', PROP_ID='U' /
+&DEVC ID='Cp', XYZ=..., IOR=2, QUANTITY='PRESSURE COEFFICIENT', PROP_ID='U' /
+&PROP ID='U', CHARACTERISTIC_VELOCITY=3.4 /
+```
+
+因此，您既可以绘制所有表面点的 Cp 值，也可以使用单个设备在单个点上创建 Cp 的单一时间历史。
+
+**Wall pressure, viscous stresses and integrated forces**
+
+如果您希望输出壁面上某一点的压力或其旁边流向的粘性应力，可以在表格中设置设备：
+
+```fortran
+&DEVC ID='WP', XYZ=..., IOR=..., QUANTITY='WALL PRESSURE', SURF_ID='MySurf' /
+&DEVC ID='WS', XYZ=..., IOR=..., QUANTITY='VISCOUS STRESS WALL ', SURF_ID='MySurf' /
+```
+
+通过添加三元组 FORCE_DIRECTION，可以得到在指定方向上投射到所述点的相应分布力。您还可以对这些分布力进行积分，得到曲面上的总压力和粘性力。举例来说，如果要计算 SURF_ID='MySurf'的面在体积 XB 的 X 方向上的总力，请添加
+
+```fortran
+&DEVC ID='PFx', XB=..., QUANTITY='WALL PRESSURE', SURF_ID='MySurf',
+SPATIAL_STATISTIC='SURFACE INTEGRAL', FORCE_DIRECTION=1.,0.,0. /
+&DEVC ID='VFx', XB=..., QUANTITY='VISCOUS STRESS WALL ',
+SURF_ID='MySurf', SPATIAL_STATISTIC='SURFACE INTEGRAL',
+FORCE_DIRECTION=1.,0.,0. /
+```
+
+
 
 # Alphabetical List of Input Parameters
 
@@ -6737,7 +8608,29 @@ ENDDO
 [^52]:G. Heskestad and R.G. Bill. Quantification of Thermal Responsiveness of Automatic Sprinklers Including Conduction Effects. Fire Safety Journal, 14:113–125, 1988. 275
 [^53]:T. Cleary, A. Chernovsky, W. Grosshandler, and M. Anderson. Particulate Entry Lag in Spot-Type Smoke Detectors. In Fire Safety Science – Proceedings of the Sixth International Symposium, pages 779–790. International Association for Fire Safety Science, 1999. 282
 [^54]:M.J. Hurley, editor. SFPE Handbook of Fire Protection Engineering. Springer, New York, 5th edition, 2016. 282
-
+[^55]:J.W. Deardorff. Stratocumulus-capped mixed layers derived from a three-dimensional model. Boundary-Layer Meteorol., 18:495–527, 1980. 310
+[^56]:Stephen B. Pope. Turbulent Flows. Cambridge University Press, 2000. 310, 386, 387
+[^57]:J. Smagorinsky. General Circulation Experiments with the Primitive Equations. I. The Basic Experiment. Monthly Weather Review, 91(3):99–164, March 1963. 310
+[^58]:M. Germano, U. Piomelli, P. Moin, and W. Cabot. A dynamic subgrid-scale eddy viscosity model. Physics of Fluids A, 3(7):1760–1765, 1991. 310
+[^59]:P. Moin, K. Squires,W. Cabot, and S. Lee. A dynamic subgrid-scale model for compressible turbulence and scalar transport. Phys. Fluids A, 3(11):2746–2757, 1991. 310
+[^60]:B. Vreman. An eddy-viscosity subgrid-scale model for turbulent shear flow: Algebraic theory and applications. Physics of Fluids, 16(10):3670–3681, 2004. 310
+[^61]:F. Nicoud and F. Ducros. Subgrid-Scale Stress Modelling Based on the Square of the Velocity Gradient Tensor. Flow, Turbulence, and Combustion, 62:183–200, 1999. 310
+[^62]:D.C. Wilcox. Turbulence Modeling for CFD. DCW Industries, Inc., 2nd edition, 1998. 310
+[^63]:P.L. Roe. Characteristics-based schemes for the euler equations. Ann. Rev. Fluid Mech., 18:337, 1986. 313
+[^64]:G. Zhou. Numerical simulations of physical discontinuities in single and multi-fluid flows for arbitrary Mach numbers. PhD thesis, Chalmers Univ. of Tech., Goteborg, Sweden, 1995. 313
+[^65]:Y. Xin. Baroclinic Effects on Fire Flow Field. In Proceedings of the Fourth Joint Meeting of the U.S. Sections of the Combustion Institute. Combustion Institute, Pittsburgh, Pennsylvania, March 2005. 330
+[^66]:Bruce R. Munson, Donald F. Young, and Theodore H. Okiishi. Fundamentals of Fluid Mechanics. John Wiley and Sons, 1990. 333
+[^67]:R. I. Harris. Gumbel re-visited—a new look at extreme value statistics applied to wind speeds. Journal of Wind Engineering and Industrial Aerodynamics, 59:1–22, 1996. 346
+[^68]:Pamela P. Walatka and Pieter G. Buning. PLOT3D User’s Manual, version 3.5. NASA Technical Memorandum 101067, NASA, 1989. 354
+[^69]:G.W. Mulholland. SFPE Handbook of Fire Protection Engineering, chapter Smoke Production and Properties. National Fire Protection Association, Quincy, Massachusetts, 3rd edition, 2002. 362, 363
+[^70]:G.W. Mulholland and C. Croarkin. Specific Extinction Coefficient of Flame Generated Smoke. Fire and Materials, 24:227–230, 2000. 363
+[^71]:M.L. Janssens and H.C. Tran. Data Reduction of Room Tests for Zone Model Validation. Journal of Fire Science, 10:528–555, 1992. 364
+[^72]:Y.P. He, A. Fernando, and M.C. Luo. Determination of interface height from measured parameter profile in enclosure fire experiment. Fire Safety Journal, 31:19–38, 1998. 365
+[^73]:S. Welsh and P. Rubini. Three-dimensional Simulation of a Fire-Resistance Furnace. In Fire Safety Science – Proceedings of the Fifth International Symposium. International Association for Fire Safety Science, 1997. 365
+[^74]:A.V. Murthy, I.Wetterlund, and D.P. DeWitt. Characterization of an Ellipsoidal Radiometer. Journal of Research of the National Institute of Standards and Technology, 108(2):115–124, March-April 2003. 370
+[^75]:U. Wickström, D. Duthinh, and K.B. McGrattan. Adiabatic Surface Temperature for Calculating Heat Transfer to Fire Exposed Structures. In Proceedings of the Eleventh International Interflam Conference. Interscience Communications, London, 2007. 371
+[^76]:M. Malendowski. Analytical Solution for Adiabatic Surface Temperature (AST). Fire Technology, 53:413–420, 2017. 371
+[^77]:D.A. Purser. SFPE Handbook of Fire Protection Engineering, chapter Combustion Toxicity. Springer, New York, 5th edition, 2016. 378, 379
 # 工业界的咨询资源【网站】
 
 - 私立或工业机构：
