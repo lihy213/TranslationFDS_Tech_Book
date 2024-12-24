@@ -7552,7 +7552,7 @@ $$
 
 位于 x = x0 处、以 y1 ≤ y ≤ y2 和 z1 ≤ z ≤ z2 为边界的窗口的焓流由以下公式给出：
 $$
-\begin{aligned}\dot{q}(t)&=\int_{z_{1}}^{z_{2}}\int_{y_{1}}^{y_{2}}\left[\rho\left(h_{\mathrm{s}}(T)-h_{\mathrm{s}}(T_{\infty})\right)u-k\frac{\partial T}{\partial x}\right]\mathrm{d}y\mathrm{d}z\approx\\&\sum_{k=k_1}^{k_2}\sum_{j=j_1}^{j_2}\left[\rho_{i+\frac{1}{2},jk}\left(h_\mathrm{s}(T_{i+\frac{1}{2},jk})-h_\mathrm{s}(T_\infty)\right)u_{ijk}-k_{ijk}\frac{T_{i+1,jk}-T_{ijk}}{\delta x}\right]\delta y\delta z\end{aligned}
+\begin{aligned}\dot{q}(t)&=\int_{z_{1}}^{z_{2}}\int_{y_{1}}^{y_{2}}\left[\rho\left(h_{\mathrm{s}}(T)-h_{\mathrm{s}}(T_{\infty})\right)u-k\frac{\partial T}{\partial x}\right]\mathrm{d}y\mathrm{d}z\approx\\&\sum_{k=k_1}^{k_2}\sum_{j=j_1}^{j_2}\left[\rho_{i+\frac{1}{2},jk}\left(h_\mathrm{s}(T_{i+\frac{1}{2},jk})-h_\mathrm{s}(T_\infty)\right)u_{ijk}-k_{ijk}\frac{T_{i+1,jk}-T_{ijk}}{\delta x}\right]\delta y\delta z\end{aligned}\label{22.32}\tag{22.32}
 $$
 要指示 FDS 输出该量，请使用输入行：
 
@@ -7994,11 +7994,1941 @@ SURF_ID='MySurf', SPATIAL_STATISTIC='SURFACE INTEGRAL',
 FORCE_DIRECTION=1.,0.,0. /
 ```
 
+### Dry Volume and Mass Fractions
+
+在实际实验过程中，CO 和 CO2 等物质通常是 “干 ”测量的；也就是说，在分析之前会从气体样本中去除水蒸气。为了更方便地将 FDS 预测值与测量数据进行比较，您可以在 DEVC 行中指定逻辑参数 DRY，以报告物种的 “MASS FRACTION ”或 “VOLUME FRACTION”。例如，第一行报告 CO 的实际体积分数，第二行报告典型实验中气体分析仪的输出结果。
+
+```fortran
+&DEVC ID='wet CO', XYZ=..., QUANTITY='VOLUME FRACTION', SPEC_ID='CARBON MONOXIDE'/
+&DEVC ID='dry CO', XYZ=..., QUANTITY='VOLUME FRACTION', SPEC_ID='CARBON MONOXIDE',
+DRY=T /
+```
+
+### Aerosol and Soot Concentration
+
+目前，从 FDS 输出气溶胶浓度（如烟尘浓度）有三种不同的设备选项。重要的是要了解每种设备输出的内容，以便做出正确的选择。
+
+```fortran
+&DEVC ID='MF_SOOT', XYZ=..., QUANTITY='MASS FRACTION', SPEC_ID='SOOT'/
+&DEVC ID='VF_SOOT', XYZ=..., QUANTITY='VOLUME FRACTION', SPEC_ID='SOOT'/
+&DEVC ID='SOOT_VF', XYZ=..., QUANTITY='AEROSOL VOLUME FRACTION', SPEC_ID='SOOT'/
+```
+
+指定 DEVC 为 “MASS FRACTION（质量分数）”，SPEC_ID 为 SOOT，将输出气相中烟尘的质量分数。VOLUME FRACTION量和 SOOT 的 SPEC_ID 将输出气相中烟尘的体积分数，将烟尘视为理想气体。AEROSOL VOLUME FRACTION（气溶胶体积分数）“量和 SPEC_ID ”SOOT"（烟尘）将根据下式输出烟尘的体积分数，就好像烟尘是计算单元中的固体颗粒一样
+$$
+f_\nu=\rho Y_\mathrm{a}/\rho_\mathrm{a}
+$$
+其中，$\rho$ 是当地密度，$Y_a$ 是气溶胶的当地质量分数，$\rho_a$ 是使用 SPEC 输入 DENSITY_SOLID 定义的气溶胶密度。DENSITY_SOLID 的默认值是 MISC 上的 SOOT_DENSITY，默认为 1800 kg/m3 煤烟[^78]。
+
+### Gas Velocity
+
+气体速度分量 u、v 和 w 可以用 “U-VELOCITY”、“V-VELOCITY ”和 “W-VELOCITY ”作为切片 (SLCF)、点设备 (DEVC)、等值面 (ISOF) 或 Plot3D 量输出。总速度只指定为 “VELOCITY”。通常情况下，速度总是正数，但可以使用值为 1、2 或 3 的参数 VELO_INDEX，分别表示速度应与 u、v 或 w 的符号相同。这在比较速度预测值和测量值时非常方便。对于 Plot3D 文件，在 DUMP 行添加 PLOT3D_VELO_INDEX(N)=...，其中 N 指 Plot3D 量 1、2、3、4 或 5。
+
+### Enthalpy
+
+有几种输出可报告气体混合物的焓值。首先，定义了 “SPECIFIC ENTHALPY ”和 “SPECIFIC SENSIBLE ENTHALPY”：
+$$
+h(T)=\Delta h_\mathrm{f}^\circ+\int_{T_\mathrm{ref}}^Tc_p(T^{\prime})\mathrm{d}T^{\prime}\quad;\quad h_\mathrm{s}(T)=\int_{T_\mathrm{ref}}^Tc_p(T^{\prime})\mathrm{d}T^{\prime}
+$$
+两者的单位都是 kJ/kg。ENTHALPY“ 和 ”SENSIBLE ENTHALPY "分别为 ρh 和 ρhs，单位为 kJ/m3。
+
+### Computer Performance
+
+有几个有用的 DEVC QUANTITY 可以帮助监控计算机的性能：
+
+’ACTUATED SPRINKLERS’ 启动的喷头数量。
+
+’CFL MAX’ 设备所在网格的 CFL（Courant-Friedrichs-Lewy）数（时间步长的主要约束条件）的最大值。默认情况下，时间步长的选择将使 CFL 数值保持在 0.8 至 1.0 的范围内。如果您想查看每个网格单元的 CFL 数值，请使用 QUANTITY='CFL' 和 CELL_CENTERED=T 的切片 (SLCF) 文件。
+
+’CPU TIME’ 模拟开始后的 CPU 耗时（秒）。
+
+’ITERATION’ 在给定模拟时间内完成的时间步数。
+
+’NUMBER OF PARTICLES’ DEVC 所在 MESH 的拉格朗日粒子数。
+
+’TIME STEP’ 模拟时间步长 δt，单位为秒。
+
+’VN MAX’ 设备所在网格的 VN（冯-诺依曼）数（时间步长的次要约束条件）的最大值。默认情况下，选择的时间步长将使 VN 数保持在 1 以下。 如果要查看每个网格单元的 VN 数，请使用 QUANTITY='VN' 和 CELL_CENTERED=T 的切片 (SLCF) 文件。
+
+’WALL CLOCK TIME’ 模拟开始后的挂钟时间（秒）。
+
+’WALL CLOCK TIME ITERATIONS’ 自时间步进循环开始后的挂钟耗时，以秒为单位。
+
+’RAM’ (Linux only) 控制该设备所在网格的进程所使用的内存，单位为 MB。该值等同于在命令提示符下执行 top 命令时在 RES 标题下报告的值。通常 RES 的单位是 kB，但这里转换为 MB。更准确地说，“RAM ”是名为 `/proc/<PID>/status `的系统文件中 VmRSS 值的 1/1000，其中 `<PID>` 是进程 ID。
+
+此外，以下标志也有助于监控 MPI 计算的性能。它们通常用于调试。
+
+VELOCITY_ERROR_FILE 如果在 DUMP 行设置为 T，该参数将导致 FDS 创建一个文件，其中包含与实体边界或内插边界处速度法向分量相关的最大误差的时间历史。有关该文件的说明，请参见第 21.3 节。
+
+### Output File Precision
+
+有几种不同的输出文件采用逗号分隔值（.csv）文件格式。这些文件由以逗号分隔的列中的实数组成。默认情况下，实数的格式为
+
+> -1.2345678E+123
+
+要更改数字的精度，可在 DUMP 行中使用 SIG_FIGS 指示尾数的有效数字个数（默认为 8）。使用 SIG_FIGS_EXP 更改指数的位数（默认为 3）。请记住，FDS 计算中内部使用的实数精度约为 12，相当于 8 字节或按照传统 Fortran 规则计算的双精度。
+
+### A Posteriori Mesh Quality Metrics
+
+特定模拟的质量与网格分辨率有着最直接的联系。这里将讨论三个输出量，用于测量速度场和标量场的误差。需要注意的是，这些指标与真正模拟质量之间的联系仍处于研究阶段。换句话说，一个好的质量分数并不足以保证一个好的模拟（目前）。
+
+**Measure of Turbulence Resolution**
+
+湍流分辨率[^79]的标量定义为：
+$$
+M(\mathbf{x})=\frac{\left\langle k_\mathrm{sgs}\right\rangle}{\left\langle\mathrm{TKE}\right\rangle+\left\langle k_\mathrm{sgs}\right\rangle}\label{22.54}\tag{22.54}
+$$
+带角度的括号表示合适的时间平均值。
+
+湍流动能（TKE）必须进行后处理，因为在知道平均值之前我们无法计算波动。使用以下 DEVC 输出三个速度分量：
+
+```fortran
+&DEVC ..., QUANTITY='U-VELOCITY' /
+&DEVC ..., QUANTITY='V-VELOCITY' /
+&DEVC ..., QUANTITY='W-VELOCITY' /
+```
+
+TKE 的计算公式为
+$$
+\mathrm{TKE}=\frac{1}{2}\left((\tilde{u}-\langle\tilde{u}\rangle)^2+(\tilde{v}-\langle\tilde{v}\rangle)^2+(\tilde{w}-\langle\tilde{w}\rangle)^2\right)
+$$
+子网格动能是根据 Deardorff 的涡粘模型估算的（见 [^29] ）。
+$$
+k_{\mathrm{sgs}}\approx(\mu_t/(\rho C_v\Delta))^2
+$$
+要输出单位质量子网格动能的估计值，请使用
+
+```fortran
+&DEVC ..., QUANTITY='SUBGRID KINETIC ENERGY' /
+```
+
+然后，您应该求出 TKE 和 ksgs 的平均值，以便在$\eqref{22.54}$ 中使用。
+
+图 22.9 说明了测量湍流分辨率的概念。请注意，左边的网格信号与测试信号之间的差异非常小。在右侧，网格信号非常湍急，而相应的测试信号则平滑得多。由此我们可以推断，气流未被充分解析。
+
+![image-20241224083742952](./../FUG6.9.1翻译.assets/image-20241224083742952.png)
+
+对于各向同性湍流的典型情况，波普实际上是这样定义 LES 的：M <0.2。也就是说，LES 要求对流场中 80% 的动能进行解析（因为这将网格奈奎斯特极限置于惯性子范围内）。问题在于，对于特定的工程问题，这个临界值是否足够或必要。如参考文献[^80]所示，将 M 的平均值保持在 0.2 附近确实可以为非反应浮力羽流中的平均速度和物种浓度提供令人满意的结果（模拟结果在实验误差范围内）。
+
+**Wavelet Error Measure**
+
+我们称之为小波误差度量或 WEM 的分辨率度量，可以通过以下方式输出
+
+```fortran
+&SLCF PBY=0, QUANTITY='WAVELET ERROR', QUANTITY2='HRRPUV' /
+```
+
+我们首先介绍简单的哈尔小波[^81]的背景。读者可参阅 Schneider 和 Vasilyev [^82]，对小波方法进行更深入、更复杂的评述。
+
+假设标量函数 f (r) 在离散点 $r_j$ 上取样，两点之间相距 h，取值为$ s_j$。定义区间 [r1, r2] 上的单位阶跃函数为
+$$
+\varphi_{[r_1,r_2]}=\begin{cases}&1&\quad\mathrm{if}\quad r_1\leq r<r_2\\&0&\quad\mathrm{otherwise}&\end{cases}
+$$
+最简单的信号重构方法是阶跃函数近似法
+$$
+f(r)\approx\sum_js_j\varphi_{[r_j,r_j+h]}(r)
+$$
+通过以更高分辨率（如 2h 分辨率）“查看 ”信号，可在区间$[r_j,r_j+2h]$ 上对函数 f 进行相同的重构，计算公式为
+$$
+f_{[r_j,r_j+2h]}(r)=\underbrace{\frac{s_j+s_{j+1}}{2}}_{a}\varphi_{[r_j,r_j+2h]}(r)+\underbrace{\frac{s_j-s_{j+1}}{2}}_{c}\psi_{[r_j,r_j+2h]}(r)\label{22.59}\tag{22.59}
+$$
+其中，a 表示平均系数，c 表示小波系数。Haar 母小波（图 22.10）确定为
+$$
+\psi_{[r_1,r_2]}(r)=\left\{\begin{array}{ll}1&\quad\mathrm{if}\quad r_1\leq r<\frac{1}{2}(r_1+r_2)\\-1&\quad\mathrm{if}\quad\frac{1}{2}(r_1+r_2)\leq r<r_2\end{array}\right.
+$$
+![image-20241224084454127](./../FUG6.9.1翻译.assets/image-20241224084454127.png)
+
+公式 $\eqref{22.59}$ 所示的信号分解可在更高分辨率下重复进行。结果就是小波变换。这一过程完全类似于傅立叶变换，但支持更紧凑。如果我们看一个有$ 2^m $个点的一维信号，重复应用公式$\eqref{22.59}$的结果是一个有 $a_{i j}$ 成分的 m×m 平均矩阵 $\mathbf{a}$ 和一个有 $c_{i j}$ 成分的 m×m 小波系数矩阵 $\mathbf{c}$。$\mathbf{a}$ 的每一行 i 都可以从 $\mathbf{a}$ 和 $\mathbf{c}$的 i+1 行中重建。正因为如此，而且小波系数矩阵中的小值也可以舍弃，所以信号可以得到极大的压缩。
+
+在这里，我们希望利用小波分析来说明网格分辨率造成的局部误差水平。很简单，我们要问的是，从一条直线上的四个数据点样本中可以看出什么。粗略地说，我们可能会看到图 22.11 中描述的四种情况之一。在每个图窗口中，我们还显示了该信号的哈小波变换结果。首先看上面两幅图，左边是阶跃函数，右边是直线。直观地说，我们希望阶跃函数的误差大，直线的误差小。下面的误差测量方法就能实现这一目标：
+$$
+\mathrm{WEM}(\mathbf{x},t)=\max_{x,y,z}\left(\frac{|c_{11}+c_{12}|-|c_{21}|}{|a_{21}|}\right)
+$$
+需要注意的是，我们对度量进行了任意缩放，因此阶跃函数会导致 WEM 为统一值。实际上，变换是在所有坐标方向上进行的，并报告最大值。标量值可按所需时间间隔输出到 Smokeview。
+
+![image-20241224084944485](./../FUG6.9.1翻译.assets/image-20241224084944485.png)
+
+现在来看图 22.11 底部的两幅图，左边的信号可能表示假振荡或未解决的湍流运动，导致 WEM = 2。因此，我们的测量方法将这种情况视为最坏的情况。右下方的信号表明出现了一个极值，实际上大多数中心空间方案都能轻松解决这个问题，并再次得出 WEM = 0 的结果。
+
+文献[^80]报告了三种网格分辨率下非反应浮力羽流 LES 的 WEM 时间平均值。根据这项研究，目前最好的建议是保持 WEM 平均值小于 0.5。
+
+**Local Cell Reynolds Number**
+
+此外，我们还提供了本地单元雷诺数的估计值，该估计值由单元大小（LES 滤波宽度，Δ）与本地科尔莫哥罗夫尺度估计值 $\eta$之比给出（见 [^56]）。对于 DNS 而言，$\Delta\eta$ 应小于或等于 1。柯尔莫哥洛夫Kolmogorov尺度是根据其定义计算出来的：
+$$
+\eta\equiv\left(\frac{(\mu/\rho)^3}{\varepsilon}\right)^{1/4}
+$$
+其中，μ 是分子动力粘度，ρ 是密度，ε 是动能耗散率，这需要建模。在 FDS 中，我们假定耗散率在局部等同于亚网格尺度动能的产生。这意味着
+$$
+\varepsilon=(\mu_t/\rho)|\tilde{S}|^2
+$$
+其中，μt 是湍流粘度，$|\tilde{S}|$是滤波应变不变量（见 FDS 技术指南）。
+
+```fortran
+&SLCF PBY=0, QUANTITY='CELL REYNOLDS NUMBER' /
+```
+
+**Near-Wall Grid Resolution**
+
+边界层流动的大涡流模拟一般分为两类： 具有近壁分辨率的 LES 和具有近壁建模（壁函数）的 LES。FDS 采用的是后者。FDS 中使用的壁面模型是壁面定律[^56]。为使壁面模型正常工作，壁面附近的网格分辨率应在一定的 y+ 范围内，y+ 是以粘性单位表示的与壁面的非一维距离。要检查这一点，可以添加如下边界文件输出：
+
+```fortran
+&BNDF QUANTITY='VISCOUS WALL UNITS' /
+```
+
+报告的 y+ 值是壁面法向单元尺寸 ($\delta n$)除以局部粘性长度尺度 $\delta_v$ [^56] 或粗糙壁面的砂粒粗糙度 s 之间最大值的一半（因为速度停留在单元面中心）：
+$$
+y^+=\frac{\delta n/2}{\max(\delta_v,s)};\quad\delta_v=\frac{\mu/\rho}{u_\tau};\quad u_\tau=\sqrt{\tau_w/\rho},
+$$
+其中，$\tau_\mathrm{w}=\mu\partial|\mathbf{u}|/\partial n$是在壁面处评估的粘性应力（$\tau_w$由壁面函数计算，|u| 是壁面附近流向速度分量的估计值）；$u_{\tau}$是摩擦速度。摩擦速度也可以通过边界文件或连接到壁面的装置输出。例如
+
+```fortran
+&DEVC XYZ=1,0,0, QUANTITY='FRICTION VELOCITY', IOR=3, ID='u_tau' /
+```
+
+LES 的壁面函数仍在开发中，但出于效率考虑，一般建议第一个网格单元位于对流层内。除了计算时间外，高分辨率不会带来任何影响。粘性子层在 0 < y+ < 5 之间，过渡区域大致在 5 < y+ < 30 之间，y+ = 30 的值将被视为高分辨率。统计静止边界层对数区域的上限取决于雷诺数，对于瞬态流没有硬性规定。超过 y+ = 1000 时，第一个网格单元很可能位于边界层的唤醒区，可能会产生不可靠的结果。实际工程 LES 的合理目标是 $y^+=\mathscr{O}(100)$。
+
+### Extinction
+
+在燃烧过程中，了解化学反应是否、何时或在何处熄灭非常重要。输出量 输出量 EXTINCTION 可以告诉用户熄灭例程是否阻止了燃烧。默认情况下，EXTINCTION = 0 表示 FDS 的熄灭例程没有阻止燃烧。如果 EXTINCTION 值为 1，则表示例行程序阻止了燃烧。EXTINCTION 值为 1 的标准是燃料和氧化剂存在而没有任何能量释放。熄灭值为 -1 表示没有燃料或氧化剂存在。
+
+## Extracting Numbers from the Output Data Files
+
+作为 FDS-SMV 标准发布包的一部分，有一个名为 fds2ascii[^22-8]的简短 Fortran 程序。要运行该程序，只需键入
+
+> fds2ascii
+
+在命令提示符下执行。系统会向您提出一系列问题，包括要处理哪种类型的输出文件、用什么时间间隔对数据进行时间平均等。生成的文件名为 CHID_fds2ascii.csv。典型的命令行会话如下
+
+```fortran
+>> fds2ascii
+Enter Job ID string (CHID):
+bucket_test_1
+What type of file to parse?
+PL3D file? Enter 1
+SLCF file? Enter 2
+BNDF file? Enter 3
+3
+Enter Sampling Factor for Data?
+(1 for all data, 2 for every other point, etc.)
+1
+Limit the domain size? (y or n)
+y
+Enter min/max x, y and z
+-5 5 -5 5 0 1
+1 MESH 1, WALL TEMPERATURE
+Enter starting and ending time for averaging (s)
+35 36
+Enter orientation: (plus or minus 1, 2 or 3)
+3
+Enter number of variables
+1
+Enter boundary file index for variable 1
+1
+Enter output file name:
+bucket_test_1_fds2ascii.csv
+Writing to file... bucket_test_1_fds2ascii.csv
+```
+
+这些命令告诉 fds2ascii，您想将（二进制）边界文件数据转换为文本文件。您想对指定体积内的每个数据点进行采样，您只想采样指向上方（+3 方向）的曲面，您只想采样 1 个变量（反正只列出一个变量，其索引为 1 - 这只是用来列出可用文件的编号）。数据将进行时间平均处理，并输出到会话结束时列出的文件中。下面是对问题的更详细解释：
+
+**Enter Job ID string (CHID):** 输入您在参数 CHID 下输入 FDS 输入文件的任务名称。请勿包含后缀 .fds。
+
+**What type of file to parse?** 程序只能读取 Plot3D (PL3D)、切片 (SLCF) 或边界 (BNDF) 文件。
+
+**Enter Sampling Factor for Data:** 如果要打印每个点，请输入 1；每隔一个点，请输入 2，以此类推。
+
+**Domain selection:** 答案是一个或两个字母的代码。如果第一个字母是 y 或 Y，表示要打印整个域的数据子集。如果是 n 或 N，则表示您不想限制数据。答案为 z 或 Z 的情况仅适用于在崎岖地形上的室外火灾场景，您希望偏移 z 坐标，使其表示离地高度。如果双字母代码的第二个字母是 a 或 A，这表示您希望程序自动选择适当的文件。如果双字母代码的第一个字母是 y 或 Y，系统会提示您输入 6 个数字，分别表示 x、y 和 z 的最小值和最大值。
+
+**Enter starting and ending time for averaging (s):** 切片和边界文件数据将在指定的时间间隔内进行时间平均处理。
+
+**How many variables to read:** 输入您希望包含在输出文件中的不同输出数量。
+
+**Enter orientation: (plus or minus 1, 2 or 3):** 对于边界文件，您必须指定要打印输出的曲面的方向。+1 “表示正 x 方向的曲面，”-2 "表示负 y 方向的曲面，以此类推。
+
+****
+
+[^22-8]:源代码位于 GitHub 存储库 firemodels/fds 的 Utilities/fds2ascii 目录中。
+
+## Gas Phase Output Quantities
+
+表 22.4 列出了气相输出量，共分几页。文件类型 "一栏内列出了允许的量输出文件： D “表示设备 (DEVC)，”I “表示等表面 (ISOF)，”P “表示 Plot3D，”S "表示切片 (SLCF)。
+
+对于需要通过 SPEC_ID 提供物种名称的输出量，使用简单化学燃烧模型时隐含定义的物种为 “OXYGEN”、“NITROGEN”、“WATER VAPOR ”和 “CARBON DIOXIDE”。如果在 REAC 行中指定了 CO_YIELD、SOOT_YIELD 和/或 HCN_YIELD，则 “CARBON MONOXIDE”、“SOOT ”和/或 “HYDROGEN CYANIDE ”将作为输出物质。燃料种类可通过 REAC 行中指定的 FUEL 输出。举例说明如何使用物种名称，假设您想计算一氧化碳通过水平面的综合质量通量，如火灾羽流中的总夹带量。使用 “设备 ”如下
+
+```fortran
+&DEVC ID='CO_flow', XB=-5,5,-5,5,2,2, QUANTITY='MASS FLUX Z',
+SPEC_ID='CARBON MONOXIDE', SPATIAL_STATISTIC='AREA INTEGRAL' /
+```
+
+ID 只是输出文件中的一个标签。当输出量与特定气体种类或粒子类型相关时，必须在同一输入行中指定相应的 SPEC_ID 或 PART_ID。所有输出量名称都应使用单引号。
+
+<center>Table 22.4: Gas phase output quantities.</center>
+
+| QUANTITY                        | Explanation                                                  | Units                                    | File Type |
+| ------------------------------- | ------------------------------------------------------------ | ---------------------------------------- | --------- |
+| ABSOLUTE PRESSURE               | Absolute pressure,$p=\overline{p}+\tilde{p}$                 | Pa                                       | D,I,P,S   |
+| ABSORPTION COEFFICIENT          | Section 14.3                                                 | 1/m                                      | D,I,P,S   |
+| ADVECTIVE MASS FLUX X[^224-1]   | Section 22.10.10                                             | $\mathrm{kg/s/m^{2}}$                    | D,I,P,S   |
+| ADVECTIVE MASS FLUX Y[^224-1]   | Section 22.10.10                                             | $\mathrm{kg/s/m^{2}}$                    | D,I,P,S   |
+| ADVECTIVE MASS FLUX Z[^224-1]   | Section 22.10.10                                             | $\mathrm{kg/s/m^{2}}$                    | D,I,P,S   |
+| AEROSOL VOLUME FRACTION[^224-1] | Section 22.10.23                                             | mol/mol                                  | D,I,P,S   |
+| BACKGROUND PRESSURE             | Background pressure,$\overline{p}$                           | Pa                                       | D,I,P,S   |
+| CELL REYNOLDS NUMBER            | Section 22.10.28                                             |                                          | D,I,P,S   |
+| CELL U                          | $(u_{i,j,k}+u_{i-1,j,k})/2$                                  | m/s                                      | D,I,P,S   |
+| CELL V                          | $(\nu_{i,j,k}+\nu_{i,j-1,k})/2$                              | m/s                                      | D,I,P,S   |
+| CELL W                          | $(w_{i,j,k}+w_{i,j,k-1})/2$                                  | m/s                                      | D,I,P,S   |
+| CFL                             | Section 22.10.26                                             |                                          | D,I,P,S   |
+| CFL MAX                         | Section 22.10.26                                             |                                          | D         |
+| CHEMISTRY SUBITERATIONS         | Section 13.3.5                                               |                                          | D,S       |
+| CHI_R                           | Section 14.1                                                 |                                          | D,I,S     |
+| COMBUSTION EFFICIENCY           | $\delta t/\tau_{\mathrm{mix}}$                               |                                          | D,I,P,S   |
+| CONDUCTIVITY                    | Thermal conductivity                                         | W/(mK)                                   | D,I,P,S   |
+| C_SMAG                          | Smagorinsky coefficient                                      |                                          | D,I,P,S   |
+| DENSITY[^224-1]                 | Total or species density                                     | $kg/m^3$                                 | D,I,P,S   |
+| DIFFUSIVE MASS FLUX X[^224-1]   | Section 22.10.10                                             | $\mathrm{kg/s/m^{2}}$                    | D,I,P,S   |
+| DIFFUSIVE MASS FLUX Y[^224-1]   | Section 22.10.10                                             | $\mathrm{kg/s/m^{2}}$                    | D,I,P,S   |
+| DIFFUSIVE MASS FLUX Z[^224-1]   | Section 22.10.10                                             | $\mathrm{kg/s/m^{2}}$                    | D,I,P,S   |
+| DIFFUSIVITY[^224-1]             | Section 12.1.3                                               | $\mathrm{m^{2}/s}$                       | D,I,P,S   |
+| DISSIPATION RATE                | $\mu/\rho\times\text{ STRAIN RATE}$                          | $\mathrm{m}^{2}/\mathrm{s}^{3}$          | D,I,P,S   |
+| DIVERGENCE                      | $\nabla\cdot\mathbf{u}$                                      | 1/s                                      | D,I,P,S   |
+| EFFECTIVE FLAME TEMPERATURE     | Section 22.10.15                                             | ℃                                        | D,I,P,S   |
+| ENTHALPY                        | Section 12.1.3                                               | $\mathrm{kJ/m^{3}}$                      |           |
+| ENTHALPY FLUX X                 | Section 22.10.11                                             | $\mathrm{kW/m^{2}}$                      | D,I,P,S   |
+| ENTHALPY FLUX Y                 | Section 22.10.11                                             | $\mathrm{kW/m^{2}}$                      | D,I,P,S   |
+| ENTHALPY FLUX Z                 | Section 22.10.11                                             | $\mathrm{kW/m^{2}}$                      | D,I,P,S   |
+| EXTINCTION                      | Section 22.10.29                                             |                                          | D,S       |
+| EXTINCTION COEFFICIENT          | Section 22.10.5                                              | 1/m                                      | D,I,P,S   |
+| F_X, F_Y, F_Z                   | Momentum terms,$F_x,F_y,F_z$                                 | $\mathrm{m/s}^{2}$                       | D,I,P,S   |
+| H                               | ${H=|\mathbf{u}|^{2}/2+\tilde{p}/\rho}$                      | $(\mathrm{m/s})^{2}$                     | D,I,P,S   |
+| HRRPUL                          | $\int\dot{q}^{\prime\prime\prime}\mathrm{d}x\mathrm{d}y$     | kW/m                                     | D         |
+| HRRPUV                          | $\dot{q}^{\prime\prime\prime}$                               | $\mathrm{kW/m^{3}}$                      | D,I,P,S   |
+| HRRPUV REAC[^224-6]             | $\dot{q}^{\prime\prime\prime}$for REAC_ID                    | $\mathrm{kW/m^{3}}$                      | D,S       |
+| IDEAL GAS PRESSURE              | $\bar{p}=\rho RT/\overline{W}$                               | $Pa$                                     | D,I,P,S   |
+| INTEGRATED INTENSITY            | $U=\int I\mathrm{ds}$                                        | $\mathrm{kW/m^{2}}$                      | D,I,P,S   |
+| INTERNAL ENERGY                 | $\rho h-\bar{p}$                                             | $\mathrm{kJ/m^{3}}$                      | D,I,P,S   |
+| KINETIC ENERGY                  | Staggered$(u^{2}+v^{2}+w^{2})/2$                             | $(\mathrm{m/s})^{2}$                     | D,I,P,S   |
+| KOLMOGOROV LENGTH SCALE         | Section 22.10.28                                             | m                                        | D,I,P,S   |
+| MACH NUMBER                     | ${|\mathbf{u}|/\sqrt{(R/\overline{W})T\gamma}}$              |                                          | S,D       |
+| MASS FLUX X[^224-1]             | Section 22.10.10                                             | $\mathrm{kg}/(\mathrm{m}^{2}\mathrm{s})$ | D,I,P,S   |
+| MASS FLUX Y[^224-1]             | Section 22.10.10                                             | $\mathrm{kg}/(\mathrm{m}^{2}\mathrm{s})$ | D,I,P,S   |
+| MASS FLUX Z[^224-1]             | Section 22.10.10                                             | $\mathrm{kg}/(\mathrm{m}^{2}\mathrm{s})$ | D,I,P,S   |
+| MASS FRACTION[^224-1]           | $Y_{\alpha}$                                                 | $kg/kg$                                  | D,I,P,S   |
+| MAXIMUM VELOCITY ERROR          | Section 21                                                   | m/s                                      | D         |
+| MIXING TIME                     | Combustion mixing time,$\tau_{\mathrm{mix}}$                 | s                                        | D,I,P,S   |
+| MIXTURE FRACTION                | $Z$                                                          | $kg/kg$                                  | D,I,P,S   |
+| MOLECULAR VISCOSITY             | Molecular viscosity,$(u,v,w)\cdot(n_x,n_y,n_z)$              | $\mathrm{kg/(ms)}$                       | D,I,P,S   |
+| OPTICAL DENSITY                 | Section 22.10.5                                              | 1/m                                      | D,I,P,S   |
+| ORIENTED VELOCITY[^224-5]       | $(u,v,w) \cdot(n_x,n_y,n_z)$                                 | m/s                                      | D         |
+| PRESSURE                        | Perturbation pressure,$\tilde{p}$                            | Pa                                       | D,I,P,S   |
+| PRESSURE ITERATIONS             | Number of pressure iterations                                |                                          | D         |
+| PRESSURE ZONE                   | Section 10.3                                                 |                                          | D,S       |
+| Q CRITERION                     | $\frac{1}{2}[\mathrm{trace}(\nabla\mathbf{u})^{2}-\mathrm{trace}((\nabla\mathbf{u})^{2})]$ | $1/\mathrm{s}^{2}$                       | D,I,P,S   |
+| RADIAL VELOCITY                 | $(u,v)\cdot(x,y)/\sqrt{x^{2}+y^{2}}$                         | m/s                                      | D,I,P,S   |
+| RADIATION LOSS                  | $\nabla\cdot\mathbf{q}_r^{\prime\prime}$                     | $\mathrm{kW/m^{3}}$                      | D,I,P,S   |
+| RADIATIVE HEAT FLUX GAS         | Section 22.10.12                                             | $\mathrm{kW/m^{2}}$                      | D         |
+| REAC SOURCE TERM[^224-1]        | $\dot{m}_\alpha^{\prime\prime\prime}$                        | $kg/m^{3}$                               | D,I,P,S   |
+| RELATIVE HUMIDITY               | Section 13.1.1                                               | %                                        | D,I,P,S   |
+| RESOLVED KINETIC ENERGY         | $k_{res}=(\bar{u}^{2}+\bar{v}^{2}+\bar{w}^{2})/2$            | $(\mathrm{m/s})^{2}$                     | D,I,P,S   |
+| RTE SOURCE CORRECTION FACTOR    | Section 14.1.3                                               |                                          | D         |
+| SENSIBLE ENTHALPY               | Section 22.10.25                                             | $kJ/m^3$                                 | D,I,P,S   |
+| SPECIFIC ENTHALPY               | Section 22.10.25                                             | $\text{kJ/kg}$                           | D,I,P,S   |
+| SPECIFIC HEAT                   | $c_{p}$                                                      | ${\mathrm{kJ}/(\mathrm{kgK})}$           | D,I,P,S   |
+| SPECIFIC INTERNAL ENERGY        | $h-\bar{p}/\rho $                                            | $\text{kJ/kg}$                           | D,I,P,S   |
+| SPECIFIC SENSIBLE ENTHALPY      | Section 22.10.25                                             | $\text{kJ/kg}$                           | D,I,P,S   |
+| STRAIN RATE                     | $2(S_{ij}S_{ij}-1/3(\nabla\cdot\mathbf{u})^{2})$             | 1/s                                      | D,I,P,S   |
+| STRAIN RATE X                   | $\partial w/\partial y+\partial\nu/\partial z$               | 1/s                                      | D,I,P,S   |
+| STRAIN RATE Y                   | $\partial u/\partial z+\partial w/\partial x$                | 1/s                                      | D,I,P,S   |
+| STRAIN RATE Z                   | $\partial\nu/\partial x+\partial u/\partial y$               | 1/s                                      | D,I,P,S   |
+| SUBGRID KINETIC ENERGY          | Section 22.10.28                                             | $\mathrm{m^{2}/s^{2}}$                   | D,S       |
+| SUM LUMPED MASS FRACTIONS       | $\sum_{i}Z_{i}$(should be 1)                                 |                                          | D,S       |
+| SUM PRIMITIVE MASS FRACTIONS    | $\sum_\alpha Y_\alpha $(should be 1)                         |                                          | D,S       |
+| TEMPERATURE                     | Section 22.10.8                                              | ℃                                        | D,I,P,S   |
+| TOTAL MASS FLUX X[^224-1]       | Section 22.10.10 kg/                                         | $kg/s/m^{2}$                             | D,I,P,S   |
+| TOTAL MASS FLUX Y[^224-1]       | Section 22.10.10 kg/                                         | $kg/s/m^{2}$                             | D,I,P,S   |
+| TOTAL MASS FLUX Z[^224-1]       | Section 22.10.10 kg/                                         | $kg/s/m^{2}$                             | D,I,P,S   |
+| U-VELOCITY                      | Gas velocity component,$u$                                   | m/s                                      | D,I,P,S   |
+| V-VELOCITY                      | Gas velocity component,$v$                                   | m/s                                      | D,I,P,S   |
+| W-VELOCITY                      | Gas velocity component,$w$                                   | m/s                                      | D,I,P,S   |
+| VELOCITY[^224-3]                | Gas velocity                                                 | m/s                                      | D,I,P,S   |
+| VISCOSITY                       | Effective viscosity,$\mu+\mu_{\mathrm{t}}$                   | ${\mathrm{kg/(ms)}}$                     | D,I,P,S   |
+| VISIBILITY                      | Section 22.10.5                                              | m                                        | D,I,P,S   |
+| VN                              | Section 22.10.26                                             |                                          | D,I,P,S   |
+| VN MAX                          | Section 22.10.26                                             |                                          | D         |
+| VORTICITY X                     | $\partial w/\partial y-\partial\nu/\partial z$               | 1/s                                      | D,I,P,S   |
+| VORTICITY Y                     | $\partial u/\partial z-\partial w/\partial x$                | 1/s                                      | D,I,P,S   |
+| VORTICITY Z                     | $\partial\nu/\partial x-\partial u/\partial y$               | 1/s                                      | D,I,P,S   |
+| VOLUME FRACTION[^224-1]         | $X_\alpha$                                                   | mol/mol                                  | D,I,P,S   |
+| WAVELET ERROR                   | Section 22.10.28                                             |                                          | S         |
+
+****
+
+[^224-1]: 需要使用SPEC_ID指定气体种类。忽略SPEC_ID的总通量。不要用于MIXTURE FRACTION。
+[^224-2]: 需要使用PART_ID指定粒子名称。
+[^224-3]: 如果您希望将速度乘以u的符号，则将VELO_INDEX=1添加到输入行。分别用指标2和3表示v和w。
+[^224-4]: 允许可选的MATL_ID。
+[^224-5]: 在DEVC线上需要一个ORIENTATION。
+[^224-6]: 需要REAC_ID。
+
+## Solid Phase Output Quantities
+
+下表 22.5 列出了固相输出量。表中引用了适当的章节。数学符号的定义见《FDS 技术参考指南》第 1 卷[^29]。文件类型 “B ”指边界文件，“D ”指设备文件 CHID_devc.csv，“pr ”指剖面文件 CHID_prof.csv。
+
+<center>Table 22.5: Solid phase output quantities.</center>
+
+| QUANTITY                          | Explanation                           | Units                                   | File Type |
+| --------------------------------- | ------------------------------------- | --------------------------------------- | --------- |
+| ADIABATIC SURFACE TEMPERATURE     | Section 22.10.13                      | ℃                                       | B,D       |
+| AMPUA[^225-2]                     | Section 22.9.1                        | $\mathrm{kg/m^2}$                       | B,D       |
+| AMPUA_Z[^225-1]                   | Section 22.9.1                        | $\mathrm{kg/m^2}$                       | B,D       |
+| BACK WALL TEMPERATURE             | Section 22.2.2                        | ℃                                       | B,D       |
+| BURNING RATE                      | Mass loss rate of fuel                | $\mathrm{kg/(m^{2}s)}$                  | B,D       |
+| CONDENSATION HEAT FLUX            | Section 13.7                          | $\mathrm{kW/m^{2}}$                     | B,D       |
+| CONVECTIVE HEAT FLUX              | Section 22.10.12                      | $\mathrm{kW/m^{2}}$                     | B,D       |
+| CONVECTIVE HEAT FLUX GAUGE        | Section 22.10.12                      | $\mathrm{kW/m^{2}}$                     | B,D       |
+| CONVECTIVE HEAT TRANSFER REGIME   | Section 8.2.2                         |                                         | B,D       |
+| CPUA[^225-2]                      | Section 22.9.1                        | $\mathrm{kW/m^{2}}$                     | B,D       |
+| CPUA_Z[^225-1]                    | Section 22.9.1                        | $\mathrm{kW/m^{2}}$                     | B,D       |
+| DEPOSITION VELOCITY               | Section 13.4                          | m/s                                     | B,D       |
+| FRICTION VELOCITY                 | Section 22.10.28                      | m/s                                     | B,D       |
+| GAUGE HEAT FLUX                   | Section 22.10.12                      | $\mathrm{kW/m^{2}}$                     | B,D       |
+| ENTHALPY FLUX WALL                | Section 22.10.11                      | $\mathrm{kW/m^{2}}$                     | B,D       |
+| TOTAL HEAT FLUX                   | Section 22.10.12                      | $\mathrm{kW/m^{2}}$                     | B,D       |
+| EMISSIVITY                        | Surface emissivity (usually constant) |                                         | B,D       |
+| GAS DENSITY                       | Gas Density near wall                 | $\mathrm{kg/m^{3}}$                     | B,D       |
+| GAS TEMPERATURE                   | Gas Temperature near wall             | ℃                                       | B,D       |
+| HEAT TRANSFER COEFFICIENT         | Section 8.2.2                         | $\mathrm{W}/(\mathrm{m}^{2}\mathrm{K})$ | B,D       |
+| HRRPUA                            | $\dot{q}^{\prime\prime}$              | $\mathrm{kW/m^{2}}$                     | B,D       |
+| INCIDENT HEAT FLUX                | Section 22.10.12                      | $\mathrm{kW/m^{2}}$                     | B,D       |
+| INSIDE WALL TEMPERATURE           | Section 22.2.2                        | ℃                                       | D,Pr      |
+| INSIDE WALL DEPTH                 | Section 22.2.2                        | m                                       | D,Pr      |
+| MASS FLUX[^225-1][^225-4]         | Section 22.10.10                      | $\mathrm{kg/(m^{2}s)}$                  | B,D       |
+| MASS FLUX WALL[^225-1]            | Section 22.10.10                      | $\mathrm{kg/(m^{2}s)}$                  | B,D       |
+| MPUA[^225-2]                      | Section 22.9.1                        | $kg/m^{2}$                              | B,D       |
+| MPUA_Z[^225-1]                    | Section 22.9.1                        | $kg/m^{2}$                              | B,D       |
+| NORMAL VELOCITY                   | Wall normal velocity                  | m/s                                     | B,D       |
+| NORMALIZED HEATING RATE           | Section 22.10.17                      | W/g                                     | D         |
+| NORMALIZED HEAT RELEASE RATE      | Section 22.10.17                      | W/g                                     | D         |
+| NORMALIZED MASS[^225-4]           | Section 22.10.17                      |                                         | D         |
+| NORMALIZED MASS LOSS RATE[^225-4] | Section 22.10.21                      | 1/s                                     | D         |
+| PRESSURE COEFFICIENT              | Section 22.10.12                      |                                         | B,D       |
+| RADIATIVE HEAT FLUX               | Section 22.10.12                      | $\mathrm{kW/m^{2}}$                     | B,D       |
+| RADIOMETER                        | Section 22.10.12                      | $\mathrm{kW/m^{2}}$                     | B,D       |
+| REFERENCE_HEAT_FLUX               | Section 9.1.4                         | $\mathrm{kW/m^{2}}$                     | B,D       |
+| SOLID CONDUCTIVITY[^225-4]        | Section 22.2.2                        | $\mathrm{W}/(\mathrm{m}\mathrm{K})$     | D,Pr      |
+| SOLID DENSITY[^225-4]             | Section 22.2.2                        | $kg/m^{3}$                              | D,Pr      |
+| SOLID ENTHALPY[^225-4]            | Section 22.2.2                        | $\mathrm{kJ/m^{3}}$                     | D,Pr      |
+| SOLID MASS FRACTION[^225-5]       | Section 22.2.2                        | kg/kg                                   | D,Pr      |
+| SOLID SPECIFIC HEAT[^225-4]       | Section 22.2.2                        | $\mathrm{kJ}/(\mathrm{kg}\mathrm{K})$   | D,Pr      |
+| SUBSTEPS                          | Section 8.3.8                         |                                         | B,D       |
+| SURFACE DENSITY[^225-4]           | Section 22.10.17                      | $kg/m^{2}$                              | B,D       |
+| SURFACE DEPOSITION[^225-1]        | Section 13.4                          | $kg/m^{2}$                              | B,D       |
+| TOTAL MASS FLUX WALL[^225-1]      | Section 22.10.10                      | $kg/s/m^{2}$                            | B,D       |
+| VELOCITY ERROR                    | Section 21                            | m/s                                     | B,D       |
+| VISCOUS STRESS WALL               | Section 22.10.21                      | Pa                                      | B,D       |
+| VISCOUS WALL UNITS                | Section 22.10.28                      |                                         | B,D       |
+| WALL ENTHALPY                     | $\int\rho_{s}c_{s}T\mathrm{d}V_{s}$   | kJ                                      | B,D       |
+| WALL PRESSURE                     | Section 22.10.21                      | Pa                                      | B,D       |
+| WALL TEMPERATURE                  | Surface temperature                   | ℃                                       | B,D       |
+| WALL THICKNESS                    | Section 22.10.17                      | m                                       | B,D       |
+| WALL VISCOSITY                    | Near-wall viscosity,$\mu_{w}$         | $\mathrm{kg}/(\mathrm{ms})$             | B,D       |
+
+****
+
+[^225-1]: 需要使用SPEC_ID指定气体种类。
+[^225-2]: 需要使用PART_ID指定粒子名称。
+[^225-3]: 需要使用QUANTITY2指定一个额外的标量
+[^225-4]: 允许可选的MATL_ID。
+[^225-5]: 需要一个MATL_ID。
+
+## Device, Control, and Other Miscellaneous Output Quantities
+
+下表 22.6 列出了与设备和控制相关的输出量以及其他杂项输出量。文件类型 “D ”指的是设备输出文件 CHID_devc.csv。文件类型 “S ”指轮廓或 “切片 ”文件。
+
+<center>Table 22.6: Output quantities for devices, controls, and miscellaneous functions.</center>
+
+| QUANTITY                   | Explanation                        | Units | File Type |
+| -------------------------- | ---------------------------------- | ----- | --------- |
+| ACTUATED SPRINKLERS        | Section 22.10.26                   |       | D         |
+| ASPIRATION                 | Section 18.3.7                     | %/m   | D         |
+| CHAMBER OBSCURATION        | Section 18.3.5                     | %/m   | D         |
+| CELL INDEX I               | Mesh cell index in x               |       | D,S       |
+| CELL INDEX J               | Mesh cell index in y               |       | D,S       |
+| CELL INDEX K               | Mesh cell index in z               |       | D,S       |
+| CONTROL                    | Section 18.5                       |       | D         |
+| CONTROL VALUE              | Section 18.5                       |       | D         |
+| CPU TIME                   | Section 22.10.26                   | s     | D         |
+| FED                        | Section 22.10.18                   |       | D         |
+| FIC                        | Section 22.10.18                   |       | D,S       |
+| FIRE DEPTH                 | Section 18.3.8                     | m     | D         |
+| ITERATION                  | Section 22.10.26                   |       | D         |
+| LAYER HEIGHT               | Section 22.10.7                    | m     | D         |
+| LINK TEMPERATURE           | Section 18.3.4                     | ℃     | D         |
+| LOWER TEMPERATURE          | Section 22.10.7                    | ℃     | D         |
+| NUMBER OF PARTICLES        | Section 22.10.26                   |       | D         |
+| OPEN NOZZLES               | Section 22.10.26                   |       | D         |
+| PATH OBSCURATION           | Section 18.3.6                     | %     | D         |
+| RAM                        | Section 22.10.26                   | MB    | D         |
+| RANDOM NUMBER              | Uniform random variable over [0,1] |       | D         |
+| SPRINKLER LINK TEMPERATURE | Section 18.3.1                     | ℃     | D         |
+| THERMOCOUPLE               | Section 22.10.8                    | ℃     | D         |
+| TIME                       | Section 22.2                       | s     | D         |
+| TIME STEP                  | Section 22.10.26                   | s     | D         |
+| TRANSMISSION               | Section 18.3.6                     | %/m   | D         |
+| UPPER TEMPERATURE          | Section 22.10.7                    | ℃     | D         |
+| WALL CLOCK TIME            | Section 22.10.26                   | s     | D         |
+| WALL CLOCK TIME ITERATIONS | Section 22.10.26                   | s     | D         |
+
+## Droplet and Particle Output Quantities
+
+下表 22.7 列出了一些不常用的输出量。这些量主要用于诊断目的。大多数输出量的解释见《FDS 技术参考指南》第 1 卷 [^29]。
+
+<center>Table 22.7: Particle and droplet output quantities.</center>
+
+| QUANTITY                                   | Explanation                          | Units                  | File Type |
+| ------------------------------------------ | ------------------------------------ | ---------------------- | --------- |
+| ADA[^227-2]                                | Avg. Droplet (cross sectional) Area  | $\mathrm{m^{2}/m^{3}}$ | D,I,P,S   |
+| ADA_Z[^227-1]                              | Avg. Droplet (cross sectional) Area  | $\mathrm{m^{2}/m^{3}}$ | D,I,P,S   |
+| ADD[^227-2]                                | Avg. Droplet Diameter                | $\mu m$                | D,I,P,S   |
+| ADD_Z[^227-1]                              | Avg. Droplet Diameter                | $\mu m$                | D,I,P,S   |
+| ADT[^227-2]                                | Avg. Droplet Temperature             | ℃                      | D,I,P,S   |
+| ADT_Z[^227-1]                              | Avg. Droplet Temperature             | ℃                      | D,I,P,S   |
+| DROPLET VOLUME FRACTION[^227-2]            | Section 22.9.3                       |                        | D,P,S     |
+| MPUV[^227-2]                               | Section 22.9.3                       | $kg/m^{3}$             | D,P,S     |
+| MPUV_Z[^227-1]                             | Section 22.9.3                       | $kg/m^{3}$             | D,P,S     |
+| PARTICLE ACCEL X[^227-2]                   | Section 22.9.4                       | $\mathrm{m/s^{2}}$     | PA        |
+| PARTICLE ACCEL Y[^227-2]                   | Section 22.9.4                       | $\mathrm{m/s^{2}}$     | PA        |
+| PARTICLE ACCEL Z[^227-2]                   | Section 22.9.4                       | $\mathrm{m/s^{2}}$     | PA        |
+| PARTICLE AGE                               | Section 22.9.4                       | s                      | PA        |
+| PARTICLE BULK DENSITY                      | Section 22.9.4                       | $\mathrm{kg/(m^{3})}$  | PA        |
+| PARTICLE DIAMETER                          | Section 22.9.4                       | $\mu m$                | PA        |
+| PARTICLE DRAG COEFFICIENT[^227-2]          | Section 22.9.4                       |                        | PA        |
+| PARTICLE DRAG FORCE X[^227-2]              | Section 22.9.4                       | N                      | PA        |
+| PARTICLE DRAG FORCE Y[^227-2]              | Section 22.9.4                       | N                      | PA        |
+| PARTICLE DRAG FORCE Z[^227-2]              | Section 22.9.4                       | N                      | PA        |
+| PARTICLE FLUX X[^227-2]                    | Section 22.9.3                       | $\mathrm{kg/(m^{2}s)}$ | P,S       |
+| PARTICLE FLUX Y[^227-2]                    | Section 22.9.3                       | $\mathrm{kg/(m^{2}s)}$ | P,S       |
+| PARTICLE FLUX Z[^227-2]                    | Section 22.9.3                       | $\mathrm{kg/(m^{2}s)}$ | P,S       |
+| PARTICLE HEAT TRANSFER COEFFICIENT[^227-2] | Section 22.9.4                       | $\mathrm{W/m^2/K}$     | PA        |
+| PARTICLE MASS                              | Section 22.9.4                       | kg                     | PA        |
+| PARTICLE PHASE                             | Section 22.9.4                       |                        | PA        |
+| PARTICLE RADIATION LOSS                    | Section 22.9.3                       | $\mathrm{kW/m^{3}}$    | D,I,P,S   |
+| PARTICLE TEMPERATURE                       | Section 22.9.4                       | ℃                      | PA        |
+| PARTICLE U                                 | Section 22.9.4                       | m/s                    | PA        |
+| PARTICLE V                                 | Section 22.9.4                       | m/s                    | PA        |
+| PARTICLE VELOCITY                          | Section 22.9.4                       | m/s                    | PA        |
+| PARTICLE W                                 | Section 22.9.4                       | m/s                    | PA        |
+| PARTICLE WEIGHTING FACTOR                  | Section 22.9.4                       |                        | PA        |
+| PARTICLE X                                 | Section 22.9.4                       | m                      | PA        |
+| PARTICLE Y                                 | Section 22.9.4                       | m                      | PA        |
+| PARTICLE Z                                 | Section 22.9.4                       | m                      | PA        |
+| PDPA                                       | Droplet statistics, Section 22.10.16 |                        | D         |
+| QABS[^227-2]                               | Absorption efficiency of droplets    |                        | D,I,P,S   |
+| QABS_Z[^227-1]                             | Absorption efficiency of droplets    |                        | D,I,P,S   |
+| QSCA[^227-2]                               | Scattering efficiency of droplets    |                        | D,I,P,S   |
+| QSCA_Z[^227-1]                             | Scattering efficiency of droplets    |                        | D,I,P,S   |
+
+****
+
+[^227-1]: 需要使用SPEC_ID指定气体种类。
+[^227-2]: 需要使用PART_ID指定粒子名称。
+
+## Summary of HVAC Output Quantities
+
+表 22.8 汇总了暖通空调系统的各种输出量。在文件类型一栏中，D 表示用 DEVC 输入指定的设备输出，H 表示用 HVAC 输入指定的 Smokeview 输出。
+
+所有暖通空调输出量均可通过 DEVC 输入选择。请勿为暖通空调输出指定 XYZ 或 XB。使用 DEVC 时，管道的输出量需要指定 DUCT_ID，节点的输出量需要指定 NODE_ID，管道单元的输出量（指定 HVAC_MASS_TRANSPORT_CELL_L 或 ct N_CELLS）需要同时指定 DUCT_ID 和 CELL_L（从所需单元所在的第一个节点算起沿管道的距离，以米为单位）。质量和体积分数输出也需要指定 SPEC_ID。风扇和盘管输出需要其所在管道的 DUCT_ID。过滤器输出需要其所在节点的 NODE_ID。DUCT ENTHALPY FLOW（管道入口流量）量将公式$\eqref{22.32}$应用于管道中的流量。要使节点输出 NODE ENTHALPY 反映 DUCT ENTHALPY FLOW 的管道量，请为节点输出设置 RELATIVE=.TRUE。节点压差（NODE PRESSSURE DIFFERENCE）量需要指定数组 NODE_ID 的两个元素，压差的计算方法是第一个节点减去第二个节点。
+
+以 DUCT 开头的暖通空调输出量（非风管单元量）和以 NODE 开头的输出量（NODE 压力差除外）也可以输出到 CHID.hvac 文件，Smokeview 使用该文件将风管量可视化（文件格式说明请参见第 27.21 节）。这些文件在表 22.8 中的文件类型为 H。Smokeview 输出使用 HVAC 命名列表指定。要选择管道输出，请创建一个 TYPE_ID='DUCT QUANTITY LIST' 的单个 HVAC 输入；要选择节点输出，请创建一个 TYPE_ID='NODE QUANTITY LIST' 的单个 HVAC 输入。使用 QUANTITY（数量）指定一个最多包含 20 个输出的列表，如果任何数量需要一个种类，还需为该数量指定 QUANTITY_SPEC_ID。对于风道输出，如果风道被划分为多个单元，则会为每个单元写入 Smokeview 输出。可以使用 DUMP 上的 DT_HVAC 设置输出间隔。例如
+
+```fortran
+&HVAC TYPE_ID='DUCT QUANTITY LIST',
+QUANTITY='DUCT VELOCITY','DUCT LOSS','DUCT VOLUME FRACTION','DUCT VOLUME
+FRACTION',
+QUANTITY_SPEC_ID(3)='OXYGEN',QUANTITY_SPEC_ID(4)='SOOT'/
+```
+
+将输出所有管道中的流速、流量损失以及氧气和烟尘的体积分数。
+
+<center>Table 22.8: HVAC output quantities.</center>
+
+| QUANTITY                  | Explanation                                 | Units                       | File Type |
+| ------------------------- | ------------------------------------------- | --------------------------- | --------- |
+| AIRCOIL HEAT EXCHANGE     | Heat exchange rate for an aircoil           | $kW$                        | D         |
+| DUCT DENSITY              | Density of the flow in a duct               | $kg/m^{3}$                  | D,H       |
+| DUCT CELL DENSITY         | Gas density in a duct cell                  | $kg/m^{3}$                  | D         |
+| DUCT CELL MASS FRACTION   | Mass fraction of a species in a duct cell   | $kg/kg$                     | D         |
+| DUCT CELL TEMPERATURE     | Gas temperature in a duct cell              | ℃                           | D         |
+| DUCT CELL VOLUME FRACTION | Volume fraction of a species in a duct cell | $mol/mol$                   | D         |
+| DUCT ENTHALPY FLOW        | Enthalpy flow in a duct                     | $kW$                        | D,H       |
+| DUCT LOSS                 | Total flow loss coefficient for a duct      |                             | D,H       |
+| DUCT MASS FLOW            | Mass flow in a duct                         | kg/s                        | D,H       |
+| DUCT MASS FRACTION        | Mass fraction of a species in a duct        | $kg/kg$                     | D,H       |
+| DUCT TEMPERATURE          | Temperature of the flow in a duct           | ℃                           | D,H       |
+| DUCT VELOCITY             | Velocity of a duct                          | m/s                         | D,H       |
+| DUCT VOLUME FLOW          | Volumetric flow in a duct                   | $\mathrm{m}^{3}/\mathrm{s}$ | D,H       |
+| DUCT VOLUME FRACTION      | Volume fraction of a species in a duct      | $mol/mol$                   | D,H       |
+| FAN PRESSURE              | Pressure output of a fan in a duct          | Pa                          | D         |
+| FILTER LOADING            | Loading of a species in a filter            | kg                          | D         |
+| FILTER LOSS               | Flow loss through a filter                  |                             | D         |
+| NODE DENSITY              | Density of the flow through a node          | $kg/m^{3}$                  | D,H       |
+| NODE ENTHALPY             | Enthalpy of a node                          | $kJ/kg$                     | D,H       |
+| NODE SENSIBLE ENTHALPY    | Sensible Enthalpy of a node                 | $kJ/kg$                     | D,H       |
+| NODE MASS FRACTION        | Mass fraction of a species in a node        | $kg/kg$                     | D,H       |
+| NODE PRESSURE             | Pressure of a node                          | Pa                          | D,H       |
+| NODE PRESSURE DIFFERENCE  | Pressure difference between two nodes       | Pa                          | D         |
+| NODE TEMPERATURE          | Temperature of the flow though a node       | ℃                           | D,H       |
+| NODE VOLUME FRACTION      | Volume fraction of a species in a node      | $mol/mol$                   | D,H       |
+
 
 
 # Alphabetical List of Input Parameters
 
+本章列出了 FDS 的所有输入参数，按命名表分组，并以字母顺序排列。本章仅供快速参考，不能取代本指南正文中的参数详细说明。相关章节与本章表格的交叉引用请参见表 5.1。之所以这样说明，是因为列出的许多参数是相互排斥的，指定多个参数会导致程序失败或以不可预知的方式运行。此外，某些参数在指定时会触发代码以特定模式运行。例如，指定固体表面的热导率会触发代码假定材料是热厚材料，并强制指定其他属性。简单地从手册中指定尽可能多的属性是不好的做法。只需指定描述所需情景所必需的参数即可。请注意，您可以在任何命名列表行中使用字符串 FYI 进行注释或评论。
 
+## BNDF (Boundary File Parameters)
+
+<center>Table 23.1: For more information see Section 22.5.</center>
+
+| Keyword            | Type      | Description   | Units | Default |
+| ------------------ | --------- | ------------- | ----- | ------- |
+| CELL_CENTERED      | Logical   | Section 22.5  |       | F       |
+| MATL_ID            | Character | Section 22.13 |       |         |
+| PROP_ID            | Character | Section 22.13 |       |         |
+| PROP_ID            | Character | Section 22.5  |       |         |
+| QUANTITY           | Character | Section 22.13 |       |         |
+| SPEC_ID            | Character | Section 22.13 |       |         |
+| TEMPORAL_STATISTIC | Character | Section 22.5  |       |         |
+
+## CATF (Concatenate Input Files Parameters)
+
+<center>Table 23.2: For more information see Section 5.4.</center>
+
+| Keyword     | Type            | Description | Units | Default |
+| ----------- | --------------- | ----------- | ----- | ------- |
+| OTHER_FILES | Character Array | Section 5.4 |       | F       |
+
+## CLIP (Clipping Parameters)
+
+<center>Table 23.3: For more information see Section 19.5.</center>
+
+| Keyword                  | Type    | Description    | Units | Default |
+| ------------------------ | ------- | -------------- | ----- | ------- |
+| CLIP_DT_RESTRICTIONS_MAX | Integer | Section 19.5.2 |       | 5       |
+| MAXIMUM_DENSITY          | Real    | Section 19.5.2 | kg/m3 |         |
+| MAXIMUM_TEMPERATURE      | Real    | Section 19.5.1 | ℃     |         |
+| MINIMUM_DENSITY          | Real    | Section 19.5.2 | kg/m3 |         |
+| MINIMUM_TEMPERATURE      | Real    | Section 19.5.1 | ℃     |         |
+
+## COMB (General Combustion Parameters)
+
+<center>Table 23.4: For more information see Chapter 13.</center>
+
+| Keyword                             | Type      | Description    | Units | Default |
+| ----------------------------------- | --------- | -------------- | ----- | ------- |
+| CHECK_REALIZABILITY                 | Logical   | Section 13.3.5 |       | F       |
+| COMPUTE_ADIABATIC_FLAME_TEMPERATURE | Logical   | Section 13.1.6 |       | F       |
+| EXTINCTION_MODEL                    | Character | Section 13.1.6 |       |         |
+| FINITE_RATE_MIN_TEMP                | Real      | Section 13.3   | ℃     | -273.15 |
+| FIXED_MIX_TIME                      | Real      | Section 13.1.5 | s     |         |
+| FREE_BURN_TEMPERATURE               | Real      | Section 13.1.6 | ℃     | 600     |
+| INITIAL_UNMIXED_FRACTION            | Real      | Section 13.1.5 |       | 1.0     |
+| MAX_CHEMISTRY_SUBSTEPS              | Integer   | Section 13.3.5 |       | 20      |
+| N_FIXED_CHEMISTRY_SUBSTEPS          | Integer   | Section 13.3.5 |       | -1      |
+| ODE_SOLVER                          | Character | Section 13.3.5 |       |         |
+| RICHARDSON_ERROR_TOLERANCE          | Real      | Section 13.3.5 |       | 1.0 E-6 |
+| SUPPRESSION                         | Logical   | Section 13.1.6 |       | T       |
+| TAU_CHEM                            | Real      | Section 13.1.5 |       | 1.E-10  |
+| TAU_FLAME                           | Real      | Section 13.1.5 |       | 1.E10   |
+| ZZ_MIN_GLOBAL                       | Real      | Section 13.3   |       | 1.E-10  |
+
+## CSVF (Comma Separated Velocity Files)
+
+<center>Table 23.5: For more information see Section 20.6.</center>
+
+| Keyword  | Type      | Description  | Units | Default |
+| -------- | --------- | ------------ | ----- | ------- |
+| SPECFILE | Character | Section 20.6 |       |         |
+| TMPFILE  | Character | Section 20.6 |       |         |
+| UVWFILE  | Character | Section 20.6 |       |         |
+
+## CTRL (Control Function Parameters)
+
+<center>Table 23.6: For more information see Section 18.5.</center>
+
+| Keyword           | Type          | Description     | Units | Default |
+| ----------------- | ------------- | --------------- | ----- | ------- |
+| CONSTANT          | Real          | Section 18.5.6  |       |         |
+| CONTROL_FORCE(3)  | Logical Array | Section 18.5.7  |       | F       |
+| DELAY             | Real          | Section 18.5.10 | s     | 0.      |
+| DIFFERENTIAL_GAIN | Real          | Section 18.5.7  |       | 0.      |
+| FUNCTION_TYPE     | Character     | Section 18.4    |       |         |
+| ID                | Character     | Section 18.5    |       |         |
+| INITIAL_STATE     | Logical       | Section 18.4    |       | F       |
+| INPUT_ID          | Char. Array   | Section 18.5    |       |         |
+| INTEGRAL_GAIN     | Real          | Section 18.5.7  |       | 0.      |
+| LATCH             | Logical       | Section 18.4    |       | T       |
+| N                 | Integer       | Section 18.5    |       | 1       |
+| ON_BOUND          | Character     | Section 18.5.3  |       | LOWER   |
+| PERCENTILE        | Real          | Section 18.5.8  |       |         |
+| PROPORTIONAL_GAIN | Real          | Section 18.5.7  |       | 0.      |
+| RAMP_ID           | Character     | Section 18.5.5  |       |         |
+| SETPOINT(2)       | Real          | Section 18.4    |       |         |
+| TARGET_VALUE      | Real          | Section 18.5.7  |       | 0.      |
+| TRIP_DIRECTION    | Integer       | Section 18.4    |       | 1       |
+
+## DEVC (Device Parameters)
+
+<center>Table 23.7: For more information see Section 18.1.</center>
+
+| 可输入参数         | 类型           | 描述                       | 单位 | 默认         |
+| ------------------ | -------------- | -------------------------- | ---- | ------------ |
+| ABSOLUTE_VALUE     | Logical        | Section 18.2               |      | F            |
+| BYPASS_FLOWRATE    | Real           | Section 18.3.7             | kg/s | 0            |
+| CELL_L             | Real           | Section 22.16              | m    |              |
+| CONVERSION_ADDEND  | Real           | Section 18.2               |      | 0            |
+| CONVERSION_FACTOR  | Real           | Section 18.2               |      | 1            |
+| COORD_FACTOR       | Real           | Section 22.2.5             |      | 1            |
+| CTRL_ID            | Character      | Section 18.6.1             |      |              |
+| DB                 | Character      | Section 22.2.3             |      |              |
+| DELAY              | Real           | Section 18.3.7             | s    | 0            |
+| DEPTH              | Real           | Section 22.10.17           | m    | 0            |
+| DEVC_ID            | Character      | Sections 18.3.7 and 18.6.1 |      |              |
+| D_ID               | Character      | Section 22.2.5             |      |              |
+| DRY                | Logical        | Section 22.10.22           |      | F            |
+| DUCT_ID            | Character      | Section 10.2               |      |              |
+| DX                 | Real           | Section 22.2.5             | m    | 0            |
+| DY                 | Real           | Section 22.2.5             | m    | 0            |
+| DZ                 | Real           | Section 22.2.5             | m    | 0            |
+| FLOWRATE           | Real           | Section 18.3.7             | kg/s | 0            |
+| FORCE_DIRECTION    | Real(3)        | Section 22.10.21           |      |              |
+| HIDE_COORDINATES   | Logical        | Section 22.2.5             |      | F            |
+| ID                 | Character      | Section 18.1               |      |              |
+| INITIAL_STATE      | Logical        | Section 18.4               |      | F            |
+| INIT_ID            | Character      | Section 15.4               |      |              |
+| IOR                | Integer        | Section 18.1               |      |              |
+| LATCH              | Logical        | Section 18.4               |      | T            |
+| MATL_ID            | Character      | Section 22.10.17           |      |              |
+| MOVE_ID            | Character      | Section 22.2.5             |      |              |
+| N_INTERVALS        | Integer        | Section 22.2.4             |      | 10           |
+| NODE_ID            | Character(2)   | Section 10.2               |      |              |
+| NO_UPDATE_CTRL_ID  | Character      | Section 18.6.3             |      |              |
+| NO_UPDATE_DEVC_ID  | Character      | Section 18.6.3             |      |              |
+| ORIENTATION        | Real Triplet   | Section 18.1               |      | 0,0,-1       |
+| OUTPUT             | Logical        | Section 18.2               |      | T            |
+| PART_ID            | Character      | Section 22.15              |      |              |
+| PIPE_INDEX         | Integer        | Section 18.3.1             |      | 1            |
+| POINTS             | Integer        | Section 22.2.5             |      | 1            |
+| POINTS_ARRAY_X     | Real Array     | Section 22.2.5             | m    |              |
+| POINTS_ARRAY_Y     | Real Array     | Section 22.2.5             | m    |              |
+| POINTS_ARRAY_Z     | Real Array     | Section 22.2.5             | m    |              |
+| PROP_ID            | Character      | Section 18.1               |      |              |
+| QUANTITY           | Character      | Section 18.1               |      |              |
+| QUANTITY2          | Character      | Section 22.2.5             |      |              |
+| QUANTITY_RANGE     | Real(2)        | Section 22.2.3             |      | -1.E50,1.E50 |
+| REAC_ID            | Character      | Section 22.12              |      |              |
+| RELATIVE           | Logical        | Section 18.2               |      | F            |
+| R_ID               | Character      | Section 22.2.5             |      |              |
+| ROTATION           | Real           | Section 18.1               | deg. | 0            |
+| **SETPOINT**       | Real           | Section 18.4               |      |              |
+| SMOOTHING_FACTOR   | Real           | Section 18.4               |      | 0            |
+| SPATIAL_STATISTIC  | Character      | Section 22.2.3             |      |              |
+| SPEC_ID            | Character      | Section 22.12              |      |              |
+| STATISTICS_END     | Real           | Section 22.2.4             | s    | T_BEGIN      |
+| STATISTICS_START   | Real           | Section 22.2.4             | s    | T_BEGIN      |
+| SURF_ID            | Character      | Section 22.2.3             |      |              |
+| TEMPORAL_STATISTIC | Character      | Section 22.2.3             |      |              |
+| TIME_AVERAGED      | Logical        | Section 18.2               |      |              |
+| TIME_HISTORY       | Logical        | Section 22.2.5             |      |              |
+| TIME_PERIOD        | Real           | Section 22.2.4             | s    |              |
+| TRIP_DIRECTION     | Integer        | Section 18.4               |      | 1            |
+| UNITS              | Character      | Section 18.2               |      |              |
+| VELO_INDEX         | Integer        | Section 22.10.24           |      | 0            |
+| XB(6)              | Real Sextuplet | Section 22.2.3             | m    |              |
+| XBP(6)             | Real Sextuplet | Section 22.2.5             | m    |              |
+| XYZ(3)             | Real Triplet   | Section 18.1               | m    |              |
+| X_ID               | Character      | Section 22.2.5             |      | ID-x         |
+| Y_ID               | Character      | Section 22.2.5             |      | ID-y         |
+| Z_ID               | Character      | Section 22.2.5             |      | ID-z         |
+| XYZ_UNITS          | Character      | Section 22.2.5             |      | ’m’          |
+
+## DUMP (Output Parameters)
+
+<center>Table 23.8: For more information see Chapter 22.</center>
+
+| 可输入参数           | 类型        | 描述             | 单位 | 默认       |
+| -------------------- | ----------- | ---------------- | ---- | ---------- |
+| CFL_FILE             | Logical     | Section 6.2.2    |      | F          |
+| CLIP_RESTART_FILES   | Logical     | Section 5.6      |      | T          |
+| COLUMN_DUMP_LIMIT    | Logical     | Section 18.2     |      | F          |
+| CTRL_COLUMN_LIMIT    | Integer     | Section 18.2     |      | 254        |
+| DEVC_COLUMN_LIMIT    | Integer     | Section 18.2     |      | 254        |
+| DIAGNOSTICS_INTERVAL | Integer     | Section 3.4      |      | 100        |
+| DT_BNDF              | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_CPU               | Real        | Section 27.6     | s    | 2Δt        |
+| DT_CTRL              | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_DEVC              | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_FLUSH             | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_HRR               | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_HVAC              | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_ISOF              | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_MASS              | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_PART              | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_PL3D              | Real        | Section 22.1     | s    | 2Δt        |
+| DT_PROF              | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_RADF              | Real        | Section 22.10.14 | s    | 2Δt        |
+| DT_RESTART           | Real        | Section 22.1     | s    | 2Δt        |
+| DT_SL3D              | Real        | Section 22.1     | s    | 2Δt        |
+| DT_SLCF              | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_SMOKE3D           | Real        | Section 22.1     | s    | Δt/NFRAMES |
+| DT_SPEC              | Real        | Section 20.6     | s    |            |
+| DT_TMP               | Real        | Section 20.6     | s    |            |
+| DT_UVW               | Real        | Section 20.6     | s    |            |
+| FLUSH_FILE_BUFFERS   | Logical     | Section 22       |      | T          |
+| HRR_GAS_ONLY         | Logical     | Section 22.10.1  |      | F          |
+| MASS_FILE            | Logical     | Section 22       |      | F          |
+| MAXIMUM_PARTICLES    | Integer     | Section 15.5     |      | 1000000    |
+| NFRAMES              | Integer     | Section 22       |      | 1000       |
+| PLOT3D_PART_ID(5)    | Char. Quint | Section 22.7     |      |            |
+| PLOT3D_QUANTITY(5)   | Char. Quint | Section 22.7     |      |            |
+| PLOT3D_SPEC_ID(5)    | Char. Quint | Section 22.7     |      |            |
+| PLOT3D_VELO_INDEX    | Int. Quint  | Section 22.10.24 |      | 0          |
+| RAMP_BNDF            | Character   | Section 22.1     |      |            |
+| RAMP_CPU             | Character   | Section 27.6     |      |            |
+| RAMP_CTRL            | Character   | Section 22.1     |      |            |
+| RAMP_DEVC            | Character   | Section 22.1     |      |            |
+| RAMP_FLUSH           | Character   | Section 22.1     |      |            |
+| RAMP_HRR             | Character   | Section 22.1     |      |            |
+| RAMP_HVAC            | Character   | Section 22.1     |      |            |
+| RAMP_ISOF            | Character   | Section 22.1     |      |            |
+| RAMP_MASS            | Character   | Section 22.1     |      |            |
+| RAMP_PART            | Character   | Section 22.1     |      |            |
+| RAMP_PL3D            | Character   | Section 22.1     |      |            |
+| RAMP_PROF            | Character   | Section 22.1     |      |            |
+| RAMP_RADF            | Character   | Section 22.10.14 |      |            |
+| RAMP_RESTART         | Character   | Section 22.1     |      |            |
+| RAMP_SL3D            | Character   | Section 22.1     |      |            |
+| RAMP_SLCF            | Character   | Section 22.1     |      |            |
+| RAMP_SMOKE3D         | Character   | Section 22.1     |      |            |
+| RAMP_SPEC            | Character   | Section 22.1     |      |            |
+| RAMP_TMP             | Character   | Section 22.1     |      |            |
+| RAMP_UVW             | Character   | Section 22.1     |      |            |
+| RENDER_FILE          | Character   | Reference [^17]  |      |            |
+| RESULTS_DIR          | Character   | Section 22       |      |            |
+| SIG_FIGS             | Integer     | Section 22.10.27 |      | 8          |
+| SIG_FIGS_EXP         | Integer     | Section 22.10.27 |      | 3          |
+| SMOKE3D              | Logical     | Section 22.8     |      | T          |
+| STATUS_FILES         | Logical     | Section 22       |      | F          |
+| SUPPRESS_DIAGNOSTICS | Logical     | Section 3.4      |      | F          |
+| VELOCITY_ERROR_FILE  | Logical     | Section 22.10.26 |      | F          |
+| WRITE_XYZ            | Logical     | Section 22.7     |      | F          |
+
+$\Delta t=T_{END}-T_{BEGIN}$
+
+## GEOM (Unstructured Geometry Parameters)
+
+<center>Table 23.9: For more information see Section 7.3.</center>
+
+| 可输入参数             | 类型                      | 描述           | 单位 | 默认          |
+| ---------------------- | ------------------------- | -------------- | ---- | ------------- |
+| BINARY_FILE            | Character                 | Section 7.3.9  |      | ’null’        |
+| BNDF_GEOM              | Logical                   | Section 22.5   |      | T             |
+| CELL_BLOCK_IOR         | Integer                   | Section 7.3.10 |      | 0             |
+| CELL_BLOCK_ORIENTATION | Real Triplet              | Section 7.3.10 |      | 0.0,0.0,0.0   |
+| COLOR                  | Character                 | Section 7.5    |      | ’null’        |
+| CYLINDER_LENGTH        | Real                      | Section 7.3.6  | m    |               |
+| CYLINDER_RADIUS        | Real                      | Section 7.3.6  | m    |               |
+| CYLINDER_ORIGIN        | Real Triplet              | Section 7.3.6  | m    |               |
+| CYLINDER_AXIS          | Real Triplet              | Section 7.3.6  |      |               |
+| CYLINDER_NSEG_AXIS     | Integer                   | Section 7.3.6  |      |               |
+| CYLINDER_NSEG_THETA    | Integer                   | Section 7.3.6  |      |               |
+| EXTEND_TERRAIN         | Logical                   | Section 7.3.6  |      | F             |
+| EXTRUDE                | Real                      | Section 7.3.6  | m    |               |
+| FACES                  | Array of Integer Triplets | Section 7.3    |      |               |
+| ID                     | Character                 | Section 7.3    |      | ’geom’_#      |
+| IJK                    | Integer Triplet           | Section 7.3.6  |      | 0,0,0         |
+| IS_TERRAIN             | Logical                   | Section 7.3.6  |      | F             |
+| MOVE_ID                | Character                 | Section 7.3.8  |      | ’null’        |
+| N_LAT                  | Integer                   | Section 7.3.6  |      | 0             |
+| N_LEVELS               | Integer                   | Section 7.3.6  |      | 0             |
+| N_LONG                 | Integer                   | Section 7.3.6  |      | 0             |
+| POLY                   | Integer Array             | Section 7.3.6  |      |               |
+| RGB(3)                 | Integer Triplet           | Section 7.5    |      |               |
+| SPHERE_ORIGIN          | Real Triplet              | Section 7.3.6  | m    |               |
+| SPHERE_RADIUS          | Real                      | Section 7.3.6  | m    |               |
+| SPHERE_TYPE            | Integer                   | Section 7.3.6  |      |               |
+| SURF_ID                | Character                 | Section 7.3    |      | ’INERT’       |
+| SURF_ID6(6)            | Character Sextuplet       | Section 7.2.1  |      |               |
+| SURF_IDS(3)            | Character Triplet         | Section 7.2.1  |      |               |
+| TEXTURE_MAPPING        | Character                 | Section 7.5.2  |      | ’RECTANGULAR’ |
+| TEXTURE_ORIGIN         | Real Triplet              | Section 7.5.2  | m    | 0.0,0.0,0.0   |
+| TEXTURE_SCALE          | Real                      | Section 7.5.2  |      | 1.0           |
+| TRANSPARENCY           | Real                      | Section 7.5    |      | 1.0           |
+| VERTS                  | Array of Real Triplets    | Section 7.3    | m    |               |
+| XB(6)                  | Real Array                | Section 7.3.6  | m    |               |
+| ZMIN                   | Real                      | Section 7.3.6  | m    |               |
+| ZVALS                  | Real Array                | Section 7.3.6  | m    |               |
+| ZVAL_HORIZON           | Real                      | Section 7.3.6  | m    |               |
+
+## HEAD (Header Parameters)
+
+<center>Table 23.10: For more information see Section 6.1.</center>
+
+| 可输入参数 | 类型      | 描述         | 单位 | 默认     |
+| ---------- | --------- | ------------ | ---- | -------- |
+| CHID       | Character | Section 6.1  |      | ’output’ |
+| TITLE      | Character | Section 22.7 |      |          |
+
+## HOLE (Obstruction Cutout Parameters)
+
+<center>Table 23.11: For more information see Section 7.2.7.</center>
+
+| 可输入参数   | 类型            | 描述                      | 单位 | 默认 |
+| ------------ | --------------- | ------------------------- | ---- | ---- |
+| COLOR        | Character       | Section 7.5               |      |      |
+| CTRL_ID      | Character       | Section 7.2.7             |      |      |
+| DEVC_ID      | Character       | Section 7.2.7             |      |      |
+| ID           | Character       | Identifier for input line |      |      |
+| MULT_ID      | Character       | Section 7.6               |      |      |
+| RGB(3)       | Integer Triplet | Section 7.5               |      |      |
+| TRANSPARENCY | Real            | Section 7.2.7             |      |      |
+| XB(6)        | Real Sextuplet  | Section 7.6               | m    |      |
+
+## HVAC (HVAC System Definition)
+
+<center>Table 23.12: For more information see Section 10.2.</center>
+
+| 可输入参数              | 类型          | 描述                            | 单位       | 默认      |
+| ----------------------- | ------------- | ------------------------------- | ---------- | --------- |
+| AIRCOIL_ID              | Character     | Section 10.2.1                  |            |           |
+| AMBIENT                 | Logical       | Section 10.2.3                  |            | F         |
+| AREA                    | Real          | Section 10.2.1                  | $m^2$      |           |
+| CLEAN_LOSS              | Real          | Section 10.2.5                  |            |           |
+| COOLANT_MASS_FLOW       | Real          | Section 10.2.6                  | kg/s       |           |
+| COOLANT_SPECIFIC_HEAT   | Real          | Section 10.2.6                  | $kJ/(kgK)$ |           |
+| COOLANT_TEMPERATURE     | Real          | Section 10.2.6                  | ℃          |           |
+| CTRL_ID                 | Character     | Sections 10.2.1, 10.2.4, 10.2.5 |            |           |
+| DAMPER                  | Logical       | Sections 10.2.1, 10.2.2         |            | F         |
+| DEVC_ID                 | Character     | Sections 10.2.1, 10.2.4, 10.2.5 |            |           |
+| DIAMETER                | Real          | Section 10.2.1                  | m          |           |
+| DISCHARGE_COEFFICIENT   | Real          | Section 10.3.2                  |            | 1.        |
+| DUCT_ID                 | Char. Array   | Section 10.2.3                  |            |           |
+| EFFICIENCY              | Real Array    | Sections 10.2.5, 10.2.6         |            | 1.0       |
+| FAN_ID                  | Character     | Section 10.2.1                  |            |           |
+| FILTER_ID               | Character     | Section 10.2.3                  |            |           |
+| FIXED_Q                 | Real          | Section 10.2.6                  | kW         |           |
+| ID                      | Character     | Section 10.2                    |            |           |
+| LEAK_ENTHALPY           | Logical       | Section 10.3.2                  |            | F         |
+| LEAK_PRESSURE_EXPONENT  | Real          | Section 10.3.2                  |            | 0.5       |
+| LEAK_REFERENCE_PRESSURE | Real          | Section 10.3.2                  | Pa         | 4         |
+| LENGTH                  | Real          | Section 10.2.1                  | m          |           |
+| LOADING                 | Real Array    | Section 10.2.5                  | kg         | 0.0       |
+| LOADING_MULTIPLIER      | Real Array    | Section 10.2.5                  | 1/kg       | 1.0       |
+| LOSS                    | Real Array    | Sections 10.2.1 – 10.2.5        |            | 0.0       |
+| MASS_FLOW               | Real          | Section 10.2.1                  | kg/s       |           |
+| MAX_FLOW                | Real          | Section 10.2.4                  | $m^3/s$    |           |
+| MAX_PRESSURE            | Real          | Section 10.2.4                  | Pa         |           |
+| N_CELLS                 | Integer       | Section 10.2.8                  |            | 10×LENGTH |
+| NETWORK_ID              | Character     | Section 10.2                    |            |           |
+| NODE_ID                 | Char. Doublet | Section 10.2.1                  |            |           |
+| PERIMETER               | Real          | Section 10.2.1                  | m          |           |
+| QUANTITY                | Char. Array   | Sections 22.16                  |            |           |
+| QUANTITY_SPEC_ID        | Char. Array   | Sections 22.16                  |            |           |
+| RAMP_ID                 | Character     | Sections 10.2.1, 10.2.5, 10.2.4 |            |           |
+| RAMP_LOSS               | Character     | Sections 10.2.1, 10.2.2         |            |           |
+| REVERSE                 | Logical       | Section 10.2.1                  |            | F         |
+| ROUND                   | Logical       | Section 10.2.1                  |            | T         |
+| ROUGHNESS               | Real          | Section 10.2.1                  | m          | 0.0       |
+| SPEC_ID                 | Char. Array   | Section 10.2.5                  |            |           |
+| SQUARE                  | Logical       | Section 10.2.1                  |            | T         |
+| TAU_AC                  | Real          | Section 10.2.6                  | s          | 1.0       |
+| TAU_FAN                 | Real          | Section 10.2.4                  | s          | 1.0       |
+| TAU_VF                  | Real          | Section 10.2.1                  | s          | 1.0       |
+| TRANSPORT_PARTICLES     | Logical       | Section 10.3.2                  | s          | F         |
+| TYPE_ID                 | Character     | Section 10.2                    |            |           |
+| VENT_ID                 | Character     | Section 10.2.3                  |            |           |
+| VENT2_ID                | Character     | Section 10.3.2                  |            |           |
+| VOLUME_FLOW             | Real          | Section 10.2.1, 10.2.4          | $m^3/s$    |           |
+| WAYPOINTS               | Real Array    | Section 10.2.1                  | m          |           |
+| XYZ                     | Real Triplet  | Section 10.2.3                  | m          | 0.0       |
+
+## INIT (Initial Conditions)
+
+<center>Table 23.13: For more information see Section 20.</center>
+
+| 可输入参数             | 类型            | 描述           | 单位     | 默认    |
+| ---------------------- | --------------- | -------------- | -------- | ------- |
+| BULK_DENSITY_FACTOR    | Real            | Section 17.2.2 |          | 1.      |
+| BULK_DENSITY_FILE      | Character       | Section 17.2.2 |          |         |
+| CELL_CENTERED          | Logical         | Section 15.5.3 |          | F       |
+| CROWN_BASE_HEIGHT      | Real            | Section 17.2.1 | m        |         |
+| CROWN_BASE_WIDTH       | Real            | Section 17.2.1 | m        |         |
+| CTRL_ID                | Character       | Section 15.5.3 |          |         |
+| DB                     | Character       | Section 20.1   |          |         |
+| DENSITY                | Real            | Section 20.3   | $kg/m^3$ | Ambient |
+| DEVC_ID                | Character       | Section 15.5.3 |          |         |
+| DIAMETER               | Real            | Section 15.5.3 | μm       |         |
+| DRY                    | Logical         | Section 17.2   |          | F       |
+| DT_INSERT              | Real            | Section 15.5.3 | s        |         |
+| DX                     | Real            | Section 15.5.3 | m        | 0.      |
+| DY                     | Real            | Section 15.5.3 | m        | 0.      |
+| DZ                     | Real            | Section 15.5.3 | m        | 0.      |
+| HEIGHT                 | Real            | Section 15.5.3 | m        |         |
+| HRRPUV                 | Real            | Section 20.4   | $kW/m^3$ |         |
+| ID                     | Character       | Section 15.4   |          |         |
+| INNER_RADIUS           | Real            | Section 15.5.3 | m        | 0.      |
+| MASS_FRACTION(:)       | Real Array      | Section 20.1   | kg/kg    | Ambient |
+| MASS_PER_TIME          | Real            | Section 15.5.3 | kg/s     |         |
+| MASS_PER_VOLUME        | Real            | Section 15.5.3 | $kg/m^3$ | 1       |
+| MULT_ID                | Character       | Section 7.6    |          |         |
+| NODE_ID                | Character       | Section 10.2.8 |          |         |
+| N_PARTICLES            | Integer         | Section 15.5.3 |          | 0       |
+| N_PARTICLES_PER_CELL   | Integer         | Section 15.5.3 |          | 0       |
+| ORIENTATION_RAMP(3)    | Character       | Section 15.5.4 |          |         |
+| PART_ID                | Character       | Section 15.5.3 |          |         |
+| PARTICLE_WEIGHT_FACTOR | Real            | Section 15.5.3 |          | 1.      |
+| PATH_RAMP(3)           | Character       | Section 15.5.3 |          |         |
+| RADIATIVE_FRACTION     | Real            | Section 20.4   |          | 0.      |
+| RADIUS                 | Real            | Section 15.5.3 | m        |         |
+| RAMP_PART              | Character       | Section 15.5.3 |          |         |
+| RAMP_Q                 | Character       | Section 20.4   |          |         |
+| SHAPE                  | Character       | Section 15.5.3 |          | ’BLOCK’ |
+| SPEC_ID(N)             | Character Array | Section 20.1   |          |         |
+| TEMPERATURE            | Real            | Section 20.2   | ℃        | TMPA    |
+| TREE_HEIGHT            | Real            | Section 17.2.1 | m        |         |
+| UNIFORM                | Logical         | Section 15.5.3 |          | F       |
+| UVW(3)                 | Real Array      | Section 15.5.3 | m/s      | 0.      |
+| VOLUME_FRACTION(:)     | Real Array      | Section 20.1   | mol/mol  | Ambient |
+| XB(6)                  | Real Array      | Section 20.1   | m        |         |
+| XYZ(3)                 | Real Array      | Section 15.5.3 | m        |         |
+
+## ISOF (Isosurface Parameters)
+
+<center>Table 23.14: For more information see Section 22.6.</center>
+
+| 可输入参数  | 类型       | 描述             | 单位 | 默认 |
+| ----------- | ---------- | ---------------- | ---- | ---- |
+| DELTA       | Real       | Section 22.6     |      |      |
+| QUANTITY    | Character  | Section 22.6     |      |      |
+| QUANTITY2   | Character  | Section 22.6     |      |      |
+| SKIP        | Character  | Section 22.6     |      |      |
+| SPEC_ID     | Character  | Section 22.6     |      |      |
+| SPEC_ID2    | Character  | Section 22.6     |      |      |
+| VALUE(:)    | Real Array | Section 22.6     |      |      |
+| VELO_INDEX  | Integer    | Section 22.10.24 |      | 0    |
+| VELO_INDEX2 | Integer    | Section 22.10.24 |      | 0    |
+
+## MATL (Material Properties)
+
+<center>Table 23.15: For more information see Section 8.3.</center>
+
+| 可输入参数                     | 类型        | 描述          | 单位      | 默认   |
+| ------------------------------ | ----------- | ------------- | --------- | ------ |
+| A(:)                           | Real Array  | Section 9.2   | 1/s       |        |
+| ABSORPTION_COEFFICIENT         | Real        | Section 8.3.2 | 1/m       | 50000. |
+| ADJUST_H                       | Logical     | Section 9.4   |           | T      |
+| ALLOW_SHRINKING                | Logical     | Section 9.2.3 |           | T      |
+| ALLOW_SWELLING                 | Logical     | Section 9.2.3 |           | T      |
+| BOILING_TEMPERATURE            | Real        | Section 9.2.6 | ℃         | 5000.  |
+| CONDUCTIVITY                   | Real        | Section 8.3.2 | W/(mK)    | 0.     |
+| CONDUCTIVITY_RAMP              | Character   | Section 8.3.2 |           |        |
+| DENSITY                        | Real        | Section 8.3.2 | $kg/m^3$  | 0.     |
+| E(:)                           | Real Array  | Section 9.2   | J/mol     |        |
+| EMISSIVITY                     | Real        | Section 8.3.2 |           | 0.9    |
+| GAS_DIFFUSION_DEPTH(:)         | Real Array  | Section 9.2   | m         | 0.001  |
+| HEATING_RATE(:)                | Real Array  | Section 9.2   | ℃/min     | 5.     |
+| HEAT_OF_COMBUSTION(:,:)        | Real Array  | Section 9.2   | kJ/kg     |        |
+| HEAT_OF_REACTION(:)            | Real Array  | Section 9.2   | kJ/kg     | 0.     |
+| ID                             | Character   | Section 8.1   |           |        |
+| MATL_ID(:,:)                   | Character   | Section 9.2   |           |        |
+| MAX_REACTION_RATE(:)           | Real Array  | Section 9.2.2 |           | ∞      |
+| MW                             | Real        | Section 9.2.6 | **g/mol** |        |
+| N_O2(:)                        | Real Array  | Section 9.2   |           | 0.     |
+| N_REACTIONS                    | Integer     | Section 9.2   |           | 0.     |
+| N_S(:)                         | Real Array  | Section 9.2   |           | 1.     |
+| N_T(:)                         | Real Array  | Section 9.2   |           | 0.     |
+| NU_MATL(:,:)                   | Real Array  | Section 9.2   | kg/kg     | 0.     |
+| NU_PART(:,:)                   | Real Array  | Section 9.2   | kg/kg     | 0.     |
+| NU_SPEC(:,:)                   | Real Array  | Section 9.2   | kg/kg     | 0.     |
+| PART_ID(:,:)                   | Char. Array | Section 9.2   |           |        |
+| PYROLYSIS_RANGE(:)             | Real Array  | Section 9.2.2 | ℃         | 80.    |
+| REFERENCE_ENTHALPY             | Real        | Section 9.4   | kJ/kg     |        |
+| REFERENCE_ENTHALPY_TEMPERATURE | Real        | Section 9.4   | K         |        |
+| REFERENCE_RATE(:)              | Real Array  | Section 9.2   | 1/s       |        |
+| REFERENCE_TEMPERATURE(:)       | Real Array  | Section 9.2   | ℃         |        |
+| SPECIFIC_HEAT                  | Real        | Section 8.3.2 | kJ/(kgK)  | 0.     |
+| SPECIFIC_HEAT_RAMP             | Character   | Section 8.3.2 |           |        |
+| SPEC_ID(:,:)                   | Char. Array | Section 9.2   |           |        |
+| SURFACE_OXIDATION_MODEL        | Logical     | Section 17.1  |           | F      |
+
+## MESH (Mesh Parameters)
+
+<center>Table 23.16: For more information see Section 6.3.</center>
+
+| 可输入参数           | 类型            | 描述          | 单位 | 默认        |
+| -------------------- | --------------- | ------------- | ---- | ----------- |
+| CHECK_MESH_ALIGNMENT | Logical         | Section 6.3.4 |      | F           |
+| COLOR                | Character       | Section 6.3.3 |      | ’BLACK’     |
+| CYLINDRICAL          | Logical         | Section 6.3.2 |      | F           |
+| ID                   | Character       | Section 6.3.1 |      |             |
+| IJK                  | Integer Triplet | Section 6.3.1 |      | 10,10,10    |
+| MPI_PROCESS          | Integer         | Section 6.3.3 |      |             |
+| MULT_ID              | Character       | Section 7.6   |      |             |
+| RGB                  | Integer Triplet | Section 6.3.3 |      | 0,0,0       |
+| TRNX_ID              | Character       | Section 6.3.5 |      |             |
+| TRNY_ID              | Character       | Section 6.3.5 |      |             |
+| TRNZ_ID              | Character       | Section 6.3.5 |      |             |
+| XB(6)                | Real Sextuplet  | Section 6.3.1 | m    | 0,1,0,1,0,1 |
+
+## MISC (Miscellaneous Parameters)
+
+<center>Table 23.17: For more information see Section 19.</center>
+
+| 可输入参数                   | 类型         | 描述             | 单位    | 默认        |
+| ---------------------------- | ------------ | ---------------- | ------- | ----------- |
+| AEROSOL_AL2O3                | Logical      | Section 14.3     |         | F           |
+| AEROSOL_SCRUBBING            | Logical      | Section 13.6     |         | F           |
+| AGGLOMERATION                | Logical      | Section 13.5     |         | T           |
+| ALIGNMENT_TOLERANCE          | Real         | Section 6.3.4    |         | 0.001       |
+| ALLOW_SURFACE_PARTICLES      | Logical      | Section 15.7.1   |         | T           |
+| ALLOW_UNDERSIDE_PARTICLES    | Logical      | Section 15.7.1   |         | F           |
+| BNDF_DEFAULT                 | Logical      | Section 22.5     |         | T           |
+| C_DEARDORFF                  | Real         | Section 19.2     |         | 0.1         |
+| CFL_MAX                      | Real         | Section 19.3.1   |         | 1.0         |
+| CFL_MIN                      | Real         | Section 19.3.1   |         | 0.8         |
+| CFL_VELOCITY_NORM            | Integer      | Section 19.3.1   |         |             |
+| CHECK_HT                     | Logical      | Section 19.3.4   |         | F           |
+| CHECK_VN                     | Logical      | Section 19.3.2   |         | T           |
+| CNF_CUTOFF                   | Real         | Section 15.3.3   |         | 0.005       |
+| CONSTANT_SPECIFIC_HEAT_RATIO | Logical      | Section 12.1.3   |         | F           |
+| C_SMAGORINSKY                | Real         | Section 19.2     |         | 0.20        |
+| C_VREMAN                     | Real         | Section 19.2     |         | 0.07        |
+| C_WALE                       | Real         | Section 19.2     |         | 0.60        |
+| DEPOSITION                   | Logical      | Section 13.4     |         | T           |
+| EXTERNAL_FILENAME            | Character    | Section 18.8     |         |             |
+| FIXED_LES_FILTER_WIDTH       | Real         | Section 19.2     | m       |             |
+| FLUX_LIMITER                 | Integer      | Section 19.4     |         | 2           |
+| FREEZE_VELOCITY              | Logical      | Section 20.5.2   |         | F           |
+| GAMMA                        | Real         | Section 12.1.2   |         | 1.4         |
+| GRAVITATIONAL_DEPOSITION     | Logical      | Section 13.4     |         | T           |
+| GRAVITATIONAL_SETTLING       | Logical      | Section 13.4     |         | T           |
+| GVEC(3)                      | Real Array   | Section 20.7     | $m/s^2$ | 0,0,-9.81   |
+| H_F_REFERENCE_TEMPERATURE    | Real         | Section 22.10.25 | ℃       | 25.         |
+| HUMIDITY                     | Real         | Section 12.1.1   | %       | 40.         |
+| HVAC_LOCAL_PRESSURE          | Logical      | Section 10.2     |         | T           |
+| HVAC_MASS_TRANSPORT_CELL_L   | Logical      | Section 10.2.8   |         | F           |
+| HVAC_PRES_RELAX              | Real         | Section 10.2     |         | 1.0         |
+| HVAC_QFAN                    | Logical      | Section 10.2.4   |         | F           |
+| IBLANK_SMV                   | Logical      | Section 22.4     |         | T           |
+| I_MAX_TEMP                   | Integer      | Section 19.5.1   | K       | 5000        |
+| LES_FILTER_TYPE              | Character    | Section 19.2     |         | ’MEAN’      |
+| LEVEL_SET_ELLIPSE            | Logical      | Section 17.5     |         | T           |
+| LEVEL_SET_MODE               | Integer      | Section 17.5     |         | 0           |
+| MAXIMUM_VISIBILITY           | Real         | Section 22.10.5  | m       | 30          |
+| MAX_LEAK_PATHS               | Integer      | Section 10.3.2   |         | 200         |
+| MAX_RAMPS                    | Integer      | Section 11       |         | 100         |
+| MINIMUM_ZONE_VOLUME          | Real         | Section 10.3.4   | $m^3$   | 0           |
+| MPI_TIMEOUT                  | Real         | Section 4.2      | s       | 600.        |
+| NEIGHBOR_SEPARATION_DISTANCE | Real         | Section 8.4      | m       | 0.          |
+| NOISE                        | Logical      | Section 20.5.1   |         | T           |
+| NOISE_VELOCITY               | Real         | Section 20.5.1   | m/s     | 0.005       |
+| NO_PRESSURE_ZONES            | Logical      | Section 10.3.1   |         | F           |
+| NORTH_BEARING                | Real         | Section 17.5.4   | deg.    |             |
+| NUCLEATION_SITES             | Real         | Section 13.7     | #$/m^3$ | $1×10^7$    |
+| ORIGIN_LAT                   | Real         | Section 17.5.4   | deg.    |             |
+| ORIGIN_LON                   | Real         | Section 17.5.4   | deg.    |             |
+| OVERWRITE                    | Logical      | Section 5.5      |         | T           |
+| PARTICLE_CFL                 | Logical      | Section 19.3.3   |         | F           |
+| PARTICLE_CFL_MAX             | Real         | Section 19.3.3   |         | 1.0         |
+| PARTICLE_CFL_MIN             | Real         | Section 19.3.3   |         | 0.8         |
+| POROUS_FLOOR                 | Logical      | Section 15.6     |         | T           |
+| PR                           | Real         | Section 19.2     |         | 0.5         |
+| P_INF                        | Real         | Section 20.2     | Pa      | 101325      |
+| RAMP_GX                      | Character    | Section 20.7     |         |             |
+| RAMP_GY                      | Character    | Section 20.7     |         |             |
+| RAMP_GZ                      | Character    | Section 20.7     |         |             |
+| RESTART                      | Logical      | Section 5.6      |         | F           |
+| RESTART_CHID                 | Character    | Section 5.6      |         | CHID        |
+| RND_SEED                     | Integer      | Section 5.6      |         |             |
+| SC                           | Real         | Section 20.5.1   |         | 0.5         |
+| SHARED_FILE_SYSTEM           | Logical      | Section 6.3.3    |         | T           |
+| SIMULATION_MODE              | Character    | Section 19.1     |         | ’VLES’      |
+| SMOKE3D_16                   | Logical      | Section 22.8     |         | F           |
+| SMOKE_ALBEDO                 | Real         | Reference [2]    |         | 0.3         |
+| SOLID_PHASE_ONLY             | Logical      | Section 9.3      |         | F           |
+| SOOT_DENSITY                 | Real         | Section 13.4     |         | 1800        |
+| SOOT_OXIDATION               | Logical      | Section 13.4     |         | F           |
+| TAU_DEFAULT                  | Real         | Section 11.1     | s       | 1.          |
+| TERRAIN_IMAGE                | Character    | Section 22.10.20 |         |             |
+| TEXTURE_ORIGIN(3)            | Real Triplet | Section 7.5.2    | m       | (0.,0.,0.)  |
+| THERMOPHORETIC_DEPOSITION    | Logical      | Section 13.4     |         | T           |
+| THERMOPHORETIC_SETTLING      | Logical      | Section 13.4     |         | T           |
+| THICKEN_OBSTRUCTIONS         | Logical      | Section 7.2.1    |         | F           |
+| TMPA                         | Real         | Section 20.2     | ℃       | 20.         |
+| TURBULENCE_MODEL             | Character    | Section 19.2     |         | ’DEARDORFF’ |
+| TURBULENT_DEPOSITION         | Logical      | Section 13.4     |         | T           |
+| VERBOSE                      | Logical      | Section 6.3.3    |         |             |
+| VISIBILITY_FACTOR            | Real         | Section 22.10.5  |         | 3           |
+| VN_MAX                       | Real         | Section 19.3.2   |         | 1.0         |
+| VN_MIN                       | Real         | Section 19.3.2   |         | 0.8         |
+| Y_CO2_INFTY                  | Real         | Section 13.1.1   | kg/kg   |             |
+| Y_O2_INFTY                   | Real         | Section 13.1.1   | kg/kg   |             |
+
+## MOVE (Coordinate Transformation Parameters)
+
+<center>Table 23.18: For more information see Section 11.4.</center>
+
+| 可输入参数     | 类型       | 描述                                 | 单位 | 默认       |
+| -------------- | ---------- | ------------------------------------ | ---- | ---------- |
+| AXIS(3)        | Real Array | Axis of rotation                     |      | (0.,0.,1.) |
+| SCALE          | Real       | Scaling in all directions            |      | 1.         |
+| SCALEX         | Real       | Scaling in the unrotated x direction |      | 1.         |
+| SCALEY         | Real       | Scaling in the unrotated y direction |      | 1.         |
+| SCALEZ         | Real       | Scaling in the unrotated z direction |      | 1.         |
+| DX             | Real       | Translation in the x direction       | m    | 0.         |
+| DY             | Real       | Translation in the y direction       | m    | 0.         |
+| DZ             | Real       | Translation in the z direction       | m    | 0.         |
+| ID             | Character  | Identification tag                   |      |            |
+| ROTATION_ANGLE | Real       | Angle of rotation about AXIS         | deg. | 0.         |
+| T34            | Real Array | 3×4 Transformation Matrix            |      | 0.         |
+| X0             | Real       | x origin                             | m    | 0.         |
+| Y0             | Real       | y origin                             | m    | 0.         |
+| Z0             | Real       | z origin                             | m    | 0.         |
+
+## MULT (Multiplier Function Parameters)
+
+<center>Table 23.19: For more information see Section 7.6.</center>
+
+| 可输入参数   | 类型       | 描述                                      | 单位 | 默认 |
+| ------------ | ---------- | ----------------------------------------- | ---- | ---- |
+| DX           | Real       | Spacing in the x direction                | m    | 0.   |
+| DXB(6)       | Real Array | Spacing for all 6 coordinates             | m    | 0.   |
+| DX0          | Real       | Translation in the x direction            | m    | 0.   |
+| DY           | Real       | Spacing in the y direction                | m    | 0.   |
+| DY0          | Real       | Translation in the y direction            | m    | 0.   |
+| DZ           | Real       | Spacing in the z direction                | m    | 0.   |
+| DZ0          | Real       | Translation in the z direction            | m    | 0.   |
+| ID           | Character  | Identification tag                        |      |      |
+| I_LOWER      | Integer    | Lower array bound, x direction            |      | 0    |
+| I_LOWER_SKIP | Integer    | Lower array bound begin skip, x direction |      |      |
+| I_UPPER      | Integer    | Upper array bound, x direction            |      | 0    |
+| I_UPPER_SKIP | Integer    | Upper array bound end skip, x direction   |      |      |
+| J_LOWER      | Integer    | Lower array bound, y direction            |      | 0    |
+| J_LOWER_SKIP | Integer    | Lower array bound begin skip, y direction |      |      |
+| J_UPPER      | Integer    | Upper array bound, y direction            |      | 0    |
+| J_UPPER_SKIP | Integer    | Upper array bound end skip, y direction   |      |      |
+| K_LOWER      | Integer    | Lower array bound, z direction            |      | 0    |
+| K_LOWER_SKIP | Integer    | Lower array bound begin skip, z direction |      |      |
+| K_UPPER      | Integer    | Upper array bound, z direction            |      | 0    |
+| K_UPPER_SKIP | Integer    | Upper array bound end skip, z direction   |      |      |
+| N_LOWER      | Integer    | Lower sequence bound                      |      | 0    |
+| N_LOWER_SKIP | Integer    | Lower sequence bound begin skip           |      |      |
+| N_UPPER      | Integer    | Upper sequence bound                      |      | 0    |
+| N_UPPER_SKIP | Integer    | Upper sequence bound end skip             |      |      |
+
+## OBST (Obstruction Parameters)
+
+<center>Table 23.20: For more information see Section 7.2.</center>
+
+| 可输入参数            | 类型          | 描述           | 单位  | 默认       |
+| --------------------- | ------------- | -------------- | ----- | ---------- |
+| ALLOW_VENT            | Logical       | Section 7.2.1  |       | T          |
+| BNDF_FACE(-3:3)       | Logical Array | Section 22.5   |       | T          |
+| BNDF_OBST             | Logical       | Section 22.5   |       | T          |
+| BULK_DENSITY          | Real          | Section 9.2.8  | kg/m3 |            |
+| CELL_SIZE             | Real          | Section 8.4.1  | m     |            |
+| CELL_SIZE_FACTOR      | Real          | Section 8.4.1  |       |            |
+| COLOR                 | Character     | Section 7.2.1  |       |            |
+| CTRL_ID               | Character     | Section 18.4.2 |       |            |
+| DEVC_ID               | Character     | Section 18.4.2 |       |            |
+| HEIGHT                | Real          | Section 7.6.2  | m     |            |
+| ID                    | Character     | Section 7.2.1  |       |            |
+| INTERNAL_HEAT_SOURCE  | Real          | Section 8.4.1  | kW/m3 | 0.         |
+| LENGTH                | Real          | Section 7.6.2  | m     |            |
+| MATL_ID(:)            | Char. Array   | Section 8.4.5  |       |            |
+| MATL_MASS_FRACTION(:) | Real Array    | Section 8.4.5  | kg/kg |            |
+| MULT_ID               | Character     | Section 7.6    |       |            |
+| N_LAYER_CELLS_MAX     | Integer       | Section 8.4.1  |       |            |
+| ORIENTATION(3)        | Real Array    | Section 7.6.2  | m     | (0.,0.,1.) |
+| OUTLINE               | Logical       | Section 7.2.1  |       | F          |
+| OVERLAY               | Logical       | Section 7.2.1  |       | T          |
+| PERMIT_HOLE           | Logical       | Section 7.2.7  |       | T          |
+| RADIUS                | Real          | Section 7.6.2  | m     |            |
+| REMOVABLE             | Logical       | Section 7.2.7  |       | T          |
+| RGB(3)                | Integer Array | Section 7.2.1  |       |            |
+| SHAPE                 | Character     | Section 7.6.2  |       |            |
+| STRETCH_FACTOR        | Real          | Section 8.4.1  |       |            |
+| SURF_ID               | Character     | Section 7.2.1  |       |            |
+| SURF_ID_INTERIOR      | Character     | Section 9.2.8  |       |            |
+| SURF_ID6(6)           | Char. Array   | Section 7.2.1  |       |            |
+| SURF_IDS(3)           | Char. Array   | Section 7.2.1  |       |            |
+| TEXTURE_ORIGIN(3)     | Real Array    | Section 7.5.2  | m     | (0.,0.,0.) |
+| THETA                 | Real          | Section 7.6.2  | deg.  |            |
+| THICKEN               | Logical       | Section 7.2.1  |       | F          |
+| TRANSPARENCY          | Real          | Section 7.2.1  |       | 1          |
+| WIDTH                 | Real          | Section 7.6.2  | m     |            |
+| XB(6)                 | Real Array    | Section 7.2.1  | m     |            |
+| XYZ(3)                | Real Array    | Section 7.6.2  | m     | (0.,0.,0.) |
+
+## PART (Lagrangian Particles/Droplets)
+
+<center>Table 23.21: For more information see Chapter 15.</center>
+
+| 可输入参数                            | 类型       | 描述            | 单位   | 默认              |
+| ------------------------------------- | ---------- | --------------- | ------ | ----------------- |
+| ADHERE_TO_SOLID                       | Integer    | Section 15.4.5  |        | 0                 |
+| AGE                                   | Real       | Section 15.5    | s      | $1×10^5$          |
+| BREAKUP                               | Logical    | Section 15.3.6  |        | F                 |
+| BREAKUP_CNF_RAMP_ID                   | Character  | Section 15.3.6  |        |                   |
+| BREAKUP_DISTRIBUTION                  | Character  | Section 15.3.6  |        | ’ROSIN...’        |
+| BREAKUP_GAMMA_D                       | Real       | Section 15.3.6  |        | 2.4               |
+| BREAKUP_RATIO                         | Real       | Section 15.3.6  |        | 3/7               |
+| BREAKUP_SIGMA_D                       | Real       | Section 15.3.6  |        |                   |
+| CHECK_DISTRIBUTION                    | Logical    | Section 15.3.3  |        | F                 |
+| CNF_RAMP_ID                           | Character  | Section 15.3.3  |        |                   |
+| COLOR                                 | Character  | Section 22.9    |        | ’BLACK’           |
+| COMPLEX_REFRACTIVE_INDEX              | Real       | Section 15.3.2  |        | 0.01              |
+| CTRL_ID                               | Character  | Section 15.5.1  |        |                   |
+| DENSE_VOLUME_FRACTION                 | Real       | Section 15.3.4  |        | $1×10^{−5}$       |
+| DEVC_ID                               | Character  | Section 15.5.1  |        |                   |
+| DIAMETER                              | Real       | Section 15.3.3  | μm     |                   |
+| DISTRIBUTION                          | Character  | Section 15.3.3  |        | ’ROSIN...’        |
+| DRAG_COEFFICIENT(3)                   | Real Array | Section 15.4.2  |        |                   |
+| DRAG_LAW                              | Character  | Section 15.4.2  |        | ’SPHERE’          |
+| EVAP_MODEL                            | Character  | Section 15.3    |        | B-number[^2321-1] |
+| EMBER_DENSITY_THRESHOLD               | Real       | Section 17.2.4  |        |                   |
+| EMBER_PARTICLE                        | Logical    | Section 17.2.4  |        | F                 |
+| EMBER_VELOCITY_THRESHOLD              | Real       | Section 17.2.4  |        |                   |
+| FREE_AREA_FRACTION                    | Real       | Section 15.4.9  |        |                   |
+| GAMMA_D                               | Real       | Section 15.3.3  |        | 2.4               |
+| HEAT_OF_COMBUSTION                    | Real       | Section 15.3.1  | kJ/kg  |                   |
+| HEAT_TRANSFER_COEFFICIENT_GAS         | Real       | Section 15.3.1  | W/m2/K |                   |
+| HEAT_TRANSFER_COEFFICIENT_SOLID       | Real       | Section 15.7.1  | W/m2/K | 300               |
+| HORIZONTAL_VELOCITY                   | Real       | Section 15.7.1  | m/s    | 0.2               |
+| ID                                    | Character  | Section 15.1    |        |                   |
+| INITIAL_TEMPERATURE                   | Real       | Section 15.3.1  | ℃      | TMPA              |
+| KILL_DIAMETER                         | Real       | Section 15.3.3  | μm     |                   |
+| MASSLESS                              | Logical    | Section 15.2    |        | F                 |
+| MASS_TRANSFER_COEFFICIENT             | Real       | Section 15.3.1  | m/s    |                   |
+| MAXIMUM_DIAMETER                      | Real       | Section 15.3.3  | μm     | 1000000           |
+| MINIMUM_DIAMETER                      | Real       | Section 15.3.3  | μm     |                   |
+| MONODISPERSE                          | Logical    | Section 15.3.3  |        | F                 |
+| N_STRATA                              | Integer    | Section 15.3.3  |        | 6                 |
+| NEW_PARTICLE_INCREMENT                | Integer    | Section 15.5    |        | 1000              |
+| ORIENTATION(1:3,:)                    | Real Array | Section 15.4    |        |                   |
+| PERMEABILITY(3)                       | Real Array | Section 15.4.8  |        |                   |
+| POROUS_VOLUME_FRACTION                | Real       | Section 15.4.8  |        |                   |
+| PRIMARY_BREAKUP_LENGTH                | Real       | Section 15.3.5  | m      |                   |
+| PRIMARY_BREAKUP_DRAG_REDUCTION_FACTOR | Real       | Section 15.3.5  |        | 1.0               |
+| PROP_ID                               | Character  | Section 15.1    |        |                   |
+| QUANTITIES(10)                        | Character  | Section 22.9    |        |                   |
+| QUANTITIES_SPEC_ID(10)                | Character  | Section 22.9    |        |                   |
+| RADIATIVE_PROPERTY_TABLE              | Real       | Section 15.3.2  |        |                   |
+| REAL_REFRACTIVE_INDEX                 | Real       | Section 15.3.2  |        | 1.33              |
+| RGB(3)                                | Integers   | Section 22.9    |        |                   |
+| RUNNING_AVERAGE_FACTOR                | Real       | Section 15.3.2  |        | 0.5               |
+| RUNNING_AVERAGE_FACTOR_WALL           | Real       | Section 15.3.2  |        | 0.5               |
+| SAMPLING_FACTOR                       | Integer    | Section 22.9    |        | 1                 |
+| SHAPE_FACTOR                          | Real       | Section 17.2    |        | 0.25              |
+| SIGMA_D                               | Real       | Section 15.3.3  |        |                   |
+| SPEC_ID                               | Character  | Section 15.3.1  |        |                   |
+| STATIC                                | Logical    | Section 15.4    |        | F                 |
+| SURFACE_DIAMETER                      | Real       | Section 15.7.1  | μm     |                   |
+| SURFACE_TENSION                       | Real       | Section 15.3.6  | N/m    | $7.28×10^{−2}$    |
+| SURF_ID                               | Character  | Section 15.4    |        |                   |
+| TARGET_ONLY                           | Logical    | Section 15.4.10 |        | F                 |
+| TRACK_EMBERS                          | Logical    | Section 17.2.4  |        | T                 |
+| TURBULENT_DISPERSION                  | Logical    | Section 15.2    |        | F                 |
+| VERTICAL_VELOCITY                     | Real       | Section 15.7.1  | m/s    | 0.5               |
+
+****
+
+[^2321-1]:’RANZ-MARSHALL B-NUMBER’
+
+## PRES (Pressure Solver Parameters)
+
+<center>Table 23.22: For more information see Section 21.</center>
+
+| 可输入参数                  | 类型          | 描述           | 单位     | 默认  |
+| --------------------------- | ------------- | -------------- | -------- | ----- |
+| BAROCLINIC                  | Logical       | Section 21.2   |          | T     |
+| CHECK_POISSON               | Logical       | Section 21.1   |          | F     |
+| FISHPAK_BC(3)               | Integer Array | Section 7.4.2  |          |       |
+| ITERATION_SUSPEND_FACTOR    | Real          | Section 21.1   | s        | 0.95  |
+| MAX_PRESSURE_ITERATIONS     | Integer       | Section 21.1   |          | 10    |
+| PRESSURE_RELAX_TIME         | Real          | Section 10.3.3 | s        | 1.    |
+| PRESSURE_TOLERANCE          | Real          | Section 21.1   | $s^{-2}$ |       |
+| RELAXATION_FACTOR           | Real          | Section 10.3.3 |          | 1.    |
+| SOLVER                      | Character     | Section 21.1.1 |          | ’FFT’ |
+| SUSPEND_PRESSURE_ITERATIONS | Logical       | Section 21.1   |          | T     |
+| TUNNEL_PRECONDITIONER       | Logical       | Section 21.3   |          | F     |
+| VELOCITY_TOLERANCE          | Real          | Section 21.1   | m/s      |       |
+
+## PROF (Wall Profile Parameters)
+
+<center>Table 23.23: For more information see Section 22.3.</center>
+
+| Keyword       | Type         | Description  | Units | Default |
+| ------------- | ------------ | ------------ | ----- | ------- |
+| CELL_CENTERED | Logical      | Section 22.3 |       | F       |
+| FORMAT_INDEX  | Integer      | Section 22.3 |       | 1       |
+| ID            | Character    | Section 22.3 |       |         |
+| INIT_ID       | Character    | Section 22.3 |       |         |
+| IOR           | Real         | Section 22.3 |       |         |
+| MATL_ID       | Character    | Section 22.3 |       |         |
+| QUANTITY      | Character    | Section 22.3 |       |         |
+| XYZ           | Real Triplet | Section 22.3 | m     |         |
+
+## PROP (Device Properties)
+
+<center>Table 23.24: For more information see Section 18.3.</center>
+
+| Keyword                   | Type        | Description      | Units                | Default    |
+| ------------------------- | ----------- | ---------------- | -------------------- | ---------- |
+| ACTIVATION_OBSCURATION    | Real        | Section 18.3.5   | %/m                  | 3.24       |
+| ACTIVATION_TEMPERATURE    | Real        | Section 18.3.1   | ℃                    | 74.        |
+| ALPHA_C                   | Real        | Section 18.3.5   |                      | 1.8        |
+| ALPHA_E                   | Real        | Section 18.3.5   |                      | 0.         |
+| BETA_C                    | Real        | Section 18.3.5   |                      | 1.         |
+| BETA_E                    | Real        | Section 18.3.5   |                      | 1.         |
+| CHARACTERISTIC_VELOCITY   | Real        | Section 22.10.21 | m/s                  | 1.         |
+| C_FACTOR                  | Real        | Section 18.3.1   | $(m/s)^{1/2}$        | 0.         |
+| DENSITY                   | Real        | Section 22.10.8  | kg/m3                | 8908.      |
+| DIAMETER                  | Real        | Section 22.10.8  | m                    | 0.001      |
+| EMISSIVITY                | Real        | Section 22.10.8  |                      | 0.85       |
+| FED_ACTIVITY              | Integer     | Section 22.10.18 |                      | 2          |
+| FLOW_RAMP                 | Character   | Section 18.3.1   |                      |            |
+| FLOW_RATE                 | Real        | Section 18.3.1   | L/min                |            |
+| FLOW_TAU                  | Real        | Section 18.3.1   |                      | 0.         |
+| GAUGE_EMISSIVITY          | Real        | Section 22.10.12 |                      | 1.         |
+| GAUGE_TEMPERATURE         | Real        | Section 22.10.12 | ℃                    | TMPA       |
+| HEAT_TRANSFER_COEFFICIENT | Real        | Section 22.10.8  | W/(m2K)              |            |
+| HISTOGRAM                 | Logical     | Section 22.10.19 |                      | F          |
+| HISTOGRAM_CUMULATIVE      | Logical     | Section 22.10.19 |                      | F          |
+| HISTOGRAM_LIMITS(2)       | Real Array  | Section 22.10.19 |                      |            |
+| HISTOGRAM_NBINS           | Integer     | Section 22.10.19 |                      | 10T        |
+| HISTOGRAM_NORMALIZE       | Logical     | Section 22.10.19 |                      |            |
+| ID                        | Character   | Section 18.3     |                      |            |
+| INITIAL_TEMPERATURE       | Real        | Section 18.3.1   | ℃                    | TMPA       |
+| K_FACTOR                  | Real        | Section 18.3.1   | $L/(min\ bar^{1/2})$ | 1.         |
+| LENGTH                    | Real        | Section 18.3.5   | m                    | 1.8        |
+| MASS_FLOW_RATE            | Real        | Section 18.3.1   | kg/s                 |            |
+| OFFSET                    | Real        | Section 18.3.1   | m                    | 0.05       |
+| OPERATING_PRESSURE        | Real        | Section 18.3.1   | bar                  | 1.         |
+| ORIFICE_DIAMETER          | Real        | Section 18.3.1   | m                    | 0.         |
+| PARTICLES_PER_SECOND      | Integer     | Section 18.3.1   |                      | 5000       |
+| PARTICLE_VELOCITY         | Real        | Section 18.3.1   | m/s                  | 0.         |
+| PART_ID                   | Character   | Section 18.3.1   |                      |            |
+| PDPA_END                  | Real        | Section 22.10.16 | s                    | T_END      |
+| PDPA_INTEGRATE            | Logical     | Section 22.10.16 |                      | T          |
+| PDPA_M                    | Integer     | Section 22.10.16 |                      | 0          |
+| PDPA_N                    | Integer     | Section 22.10.16 |                      | 0          |
+| PDPA_NORMALIZE            | Logical     | Section 22.10.16 |                      | T          |
+| PDPA_RADIUS               | Real        | Section 22.10.16 | m                    | 0.         |
+| PDPA_START                | Real        | Section 22.10.16 | s                    | 0.         |
+| PRESSURE_RAMP             | Character   | Section 18.3.1   |                      |            |
+| P0                        | Real        | Section 18.3.3   | m/s                  | 0.         |
+| PX(3)                     | Real        | Section 18.3.3   | m/s                  | 0.         |
+| PXX(3,3)                  | Real        | Section 18.3.3   | m/s                  | 0.         |
+| QUANTITY                  | Character   | Section 18.3.1   |                      |            |
+| RTI                       | Real        | Section 18.3.1   | $\sqrt{ms}$          | 100.       |
+| SMOKEVIEW_ID(:)           | Char. Array | Section 18.7.1   |                      |            |
+| SMOKEVIEW_PARAMETERS(:)   | Char. Array | Section 18.7.2   |                      |            |
+| SPARK                     | Logical     | Section 13.1.7   |                      | F          |
+| SPEC_ID                   | Character   | Section 18.3.5   |                      |            |
+| SPECIFIC_HEAT             | Real        | Section 22.10.8  | kJ/(kgK)             | 0.44       |
+| SPRAY_ANGLE(2,2)          | Real        | Section 18.3.1   | degrees              | 60.,75.    |
+| SPRAY_PATTERN_BETA        | Real        | Section 18.3.1   | degrees              | 5.         |
+| SPRAY_PATTERN_MU          | Real        | Section 18.3.1   | degrees              | 0.         |
+| SPRAY_PATTERN_SHAPE       | Character   | Section 18.3.1   |                      | ’GAUSSIAN’ |
+| SPRAY_PATTERN_TABLE       | Character   | Section 18.3.1   |                      |            |
+| TIME_CONSTANT             | Real        | Section 22.10.8  | s                    |            |
+| VELOCITY_COMPONENT        | Integer     | Section 18.3.3   |                      |            |
+| VIEW_ANGLE                | Real        | Section 22.10.12 | 180.                 | 180.       |
+
+## RADF (Radiation Output File Parameters)
+
+<center>Table 23.25: For more information see Section 22.10.14.</center>
+
+| Keyword | Type           | Description      | Units | Default |
+| ------- | -------------- | ---------------- | ----- | ------- |
+| I_STEP  | Integer        | Section 22.10.14 |       | 1       |
+| J_STEP  | Integer        | Section 22.10.14 |       | 1       |
+| K_STEP  | Integer        | Section 22.10.14 |       | 1       |
+| XB      | Real Sextuplet | Section 22.10.14 | m     |         |
+
+## RADI (Radiation Parameters)
+
+<center>Table 23.26: For more information see Section 14.1.</center>
+
+| Keyword                      | Type       | Description    | Units | Default |
+| ---------------------------- | ---------- | -------------- | ----- | ------- |
+| ANGLE_INCREMENT              | Integer    | Section 14.3   |       | 5       |
+| BAND_LIMITS                  | Real Array | Section 14.3.2 | μm    |         |
+| C_MAX                        | Real       | Section 14.1   |       | 100     |
+| C_MIN                        | Real       | Section 14.1   |       | 1       |
+| INITIAL_RADIATION_ITERATIONS | Integer    | Section 14.2   |       | 3       |
+| KAPPA0                       | Real       | Section 14.3   | 1/m   | 0       |
+| MIE_MINIMUM_DIAMETER         | Real       | Section 14.4   | μm    | 0.5     |
+| MIE_MAXIMUM_DIAMETER         | Real       | Section 14.4   | μm    | 1.5×D   |
+| MIE_NDG                      | Integer    | Section 14.4   |       | 50      |
+| NMIEANG                      | Integer    | Section 14.4   |       | 15      |
+| NUMBER_RADIATION_ANGLES      | Integer    | Section 14.2   |       | 100     |
+| OPTICALLY_THIN               | Logical    | Section 14.1   |       | F       |
+| PATH_LENGTH                  | Real       | Section 14.3.1 | m     | 0.1     |
+| QR_CLIP                      | Real       | Section 14.1   | kW/m3 | 10      |
+| RADIATION                    | Logical    | Section 14.1.1 |       | T       |
+| RADIATION_ITERATIONS         | Integer    | Section 14.2   |       | 1       |
+| RADTMP                       | Real       | Section 14.4   | ◦C    | 900     |
+| TIME_STEP_INCREMENT          | Integer    | Section 14.2   |       | 3       |
+| WIDE_BAND_MODEL              | Logical    | Section 14.3.2 |       | F       |
+| WSGG_MODEL                   | Logical    | Section 14.3.3 |       | F       |
+
+## RAMP (Ramp Function Parameters)
+
+<center>Table 23.27: For more information see Chapter 11.</center>
+
+| Keyword                     | Type      | Description    | Units     | Default |
+| --------------------------- | --------- | -------------- | --------- | ------- |
+| CTRL_ID                     | Character | Section 18.6.1 |           |         |
+| CTRL_ID_DEP                 | Character | Section 18.6.2 |           |         |
+| DEVC_ID                     | Character | Section 18.6.1 |           |         |
+| DEVC_ID_DEP                 | Character | Section 18.6.2 |           |         |
+| EXTERNAL_FILE               | Logical   | Section 18.8   |           | F       |
+| F                           | Real      | Chapter 11     |           |         |
+| ID                          | Character | Chapter 11     |           |         |
+| INITIAL_VALUE               | Real      | Section 18.8   |           |         |
+| NUMBER_INTERPOLATION_POINTS | Integer   | Chapter 11     |           | 5000    |
+| T                           | Real      | Chapter 11     | s (or ◦C) |         |
+| X                           | Real      | Section 20.7   | m         |         |
+| Z                           | Real      | Section 16.1   | m         |         |
+
+## REAC (Reaction Parameters)
+
+<center>Table 23.28: For more information see Chapter 13.</center>
+
+| 可输入参数                    | 类型        | 描述           | 单位    | 默认   |
+| ----------------------------- | ----------- | -------------- | ------- | ------ |
+| A                             | Real        | Section 13.3   |         |        |
+| AIT_EXCLUSION_ZONE(6,:)       | Real Array  | Section 13.1.7 | m       |        |
+| AIT_EXCLUSION_ZONE_CTRL_ID(:) | Char. Array | Section 13.1.7 |         | ’null’ |
+| AIT_EXCLUSION_ZONE_DEVC_ID(:) | Char. Array | Section 13.1.7 |         | ’null’ |
+| AUTO_IGNITION_TEMPERATURE     | Real        | Section 13.1.7 | ℃       | -273   |
+| CHECK_ATOM_BALANCE            | Logical     | Section 13.2   |         | T      |
+| CO_YIELD                      | Real        | Section 13.1.1 | kg/kg   | 0      |
+| CRITICAL_FLAME_TEMPERATURE    | Real        | Section 13.1.6 | ℃       | 1427   |
+| E                             | Real        | Section 13.3   | J/mol   |        |
+| EPUMO2                        | Real        | Section 13.1.2 | kJ/kg   | 13100  |
+| EQUATION                      | Character   | Section 13.2.5 |         |        |
+| FUEL                          | Character   | Section 13.1.1 |         |        |
+| FUEL_C_TO_CO_FRACTION         | Real        | Section 13.1.3 |         | 2/3    |
+| FUEL_H_TO_H2_FRACTION         | Real        | Section 13.1.3 |         | 0      |
+| FUEL_N_TO_HCN_FRACTION        | Real        | Section 13.1.3 |         | 1/5    |
+| FUEL_RADCAL_ID                | Character   | Section 13.1.1 |         |        |
+| HCN_YIELD                     | Real        | Section 13.1.1 | kg/kg   | 0      |
+| HEAT_OF_COMBUSTION            | Real        | Section 13.1.2 | kJ/kg   |        |
+| HOC_COMPLETE                  | Real        | Section 13.1.4 | kJ/kg   |        |
+| ID                            | Character   | Section 13.1.1 |         |        |
+| IDEAL                         | Logical     | Section 13.1.1 |         | F      |
+| LOWER_OXYGEN_LIMIT            | Real        | Section 13.1.6 | mol/mol |        |
+| N_S(:)                        | Real Array  | Section 13.3   |         |        |
+| N_SIMPLE_CHEMISTRY_REACTIONS  | Integer     | Section 13.1.3 |         | 1      |
+| N_T                           | Real        | Section 13.3   |         |        |
+| NU(:)                         | Real Array  | Section 13.3   |         |        |
+| PRIORITY                      | Integer     | Section 13.2.3 |         | 1      |
+| RADIATIVE_FRACTION            | Real        | Section 14.1   |         |        |
+| RAMP_CHI_R                    | Character   | Section 14.1   |         |        |
+| REAC_ATOM_ERROR               | Real        | Section 13.2   | atoms   | 1.E-5  |
+| REAC_MASS_ERROR               | Real        | Section 13.2   | kg/kg   | 1.E-4  |
+| REVERSE                       | Logical     | Section 13.3.2 |         | F      |
+| SOOT_YIELD                    | Real        | Section 13.1.1 | kg/kg   | 0.0    |
+| SPEC_ID_N_S(:)                | Char. Array | Section 13.3   |         |        |
+| SPEC_ID_NU(:)                 | Char. Array | Section 13.3   |         |        |
+| THIRD_BODY                    | Logical     | Section 13.3   |         | F      |
+| THIRD_EFF(:)                  | Real Array  | Section 13.3.3 |         |        |
+| THIRD_EFF_ID(:)               | Char. Array | Section 13.3.3 |         |        |
+
+## SLCF (Slice File Parameters)
+
+<center>Table 23.29: For more information see Section 22.4.</center>
+
+| Keyword       | Type       | Description                | Units | Default |
+| ------------- | ---------- | -------------------------- | ----- | ------- |
+| AGL_SLICE     | Real       | Section 22.10.20           | m     |         |
+| CELL_CENTERED | Logical    | Section 22.4               |       | F       |
+| DB            | Character  | Section 22.4               |       |         |
+| ID            | Character  | Section 22.4               |       |         |
+| MAXIMUM_VALUE | Real       | Reference [^17]            |       |         |
+| MESH_NUMBER   | Integer    | Section 22.4               |       |         |
+| MINIMUM_VALUE | Real       | Reference [^17]            |       |         |
+| PART_ID       | Character  | Section 22.12              |       |         |
+| PBX, PBY, PBZ | Real       | Section 22.4               | m     |         |
+| PROP_ID       | Character  | Section 22.10.18           |       |         |
+| QUANTITY      | Character  | Section 22.12              |       |         |
+| QUANTITY2     | Character  | Section 22.12              |       |         |
+| REAC_ID       | Character  | See QUANTITY=‘HRRPUV REAC‘ |       |         |
+| SPEC_ID       | Character  | Section 22.12              |       |         |
+| VECTOR        | Logical    | Section 22.4               |       | F       |
+| VELO_INDEX    | Integer    | Section 22.10.24           |       | 0       |
+| XB(6)         | Real Array | Array Section              | m     |         |
+
+## SM3D (Smoke3D Parameters)
+
+<center>Table 23.30: For more information see Section 22.8.</center>
+
+| Keyword  | Type      | Description  | Units | Default |
+| -------- | --------- | ------------ | ----- | ------- |
+| QUANTITY | Character | Section 22.8 |       |         |
+| SPEC_ID  | Character | Section 22.8 |       |         |
+
+## SPEC (Species Parameters)
+
+<center>Table 23.31: For more information see Section 12.</center>
+
+| 可输入参数                  | 类型        | 描述             | 单位     | 默认  |
+| --------------------------- | ----------- | ---------------- | -------- | ----- |
+| AEROSOL                     | Logical     | Section 13.4     |          | F     |
+| **BACKGROUND**              | Logical     | Section 12       |          | F     |
+| BETA_LIQUID                 | Real        | Section 15.3.1   | 1/K      |       |
+| C                           | Real        | Section 12.1.2   |          |       |
+| CONDUCTIVITY                | Real        | Section 12.1.2   | W/(mK)   |       |
+| CONDUCTIVITY_LIQUID         | Real        | Section 15.3.1   | W/(mK)   |       |
+| CONDUCTIVITY_SOLID          | Real        | Section 13.4     | W/(mK)   | 0.26  |
+| COPY_LUMPED                 | Logical     | Section 12.2     |          | F     |
+| DENSITY_LIQUID              | Real        | Section 15.3.1   | $kg/m^3$ |       |
+| DENSITY_SOLID               | Real        | Section 13.4     | $kg/m^3$ | 1800. |
+| DIFFUSIVITY                 | Real        | Section 12.1.3   | $m^2/s$  |       |
+| ENTHALPY_OF_FORMATION       | Real        | Section 15.3.1   | kJ/mol   |       |
+| EPSILONKLJ                  | Real        | Section 12.1.2   |          | 0.    |
+| FIC_CONCENTRATION           | Real        | Section 22.10.18 | ppm      | 0.    |
+| FLD_LETHAL_DOSE             | Real        | Section 22.10.18 | ppm×min  | 0.    |
+| FORMULA                     | Character   | Section 12.1.2   |          |       |
+| H                           | Real        | Section 12.1.2   |          |       |
+| HEAT_OF_VAPORIZATION        | Real        | Section 15.3.1   | kJ/kg    |       |
+| H_V_REFERENCE_TEMPERATURE   | Real        | Section 15.3.1   | ℃        |       |
+| ID                          | Character   | Section 12.1.1   |          |       |
+| LUMPED_COMPONENT_ONLY       | Logical     | Section 12.2     |          | F     |
+| MASS_EXTINCTION_COEFFICIENT | Real        | Section 18.3.5   |          | 0     |
+| MASS_FRACTION(:)            | Real Array  | Section 12.2     |          | 0     |
+| MASS_FRACTION_0             | Real        | Section 12.1.1   |          | 0     |
+| MASS_FRACTION_COND_0        | Real        | Section 13.7     |          | 0     |
+| MAX_DIAMETER                | Real        | Section 13.5     | m        |       |
+| MEAN_DIAMETER               | Real        | Section 13.4     | m        |       |
+| MELTING_TEMPERATURE         | Real        | Section 15.3.1   | ℃        |       |
+| MIN_DIAMETER                | Real        | Section 13.5     | m        |       |
+| MW                          | Real        | Section 12.1.2   | g/mol    | 29.   |
+| N                           | Real        | Section 12.1.2   |          |       |
+| N_BINS                      | Integer     | Section 13.5     |          |       |
+| O                           | Real        | Section 12.1.2   |          |       |
+| PR_GAS                      | Real        | Section 12.1.2   |          | PR    |
+| PRIMITIVE                   | Logical     | Section 12.1.2   |          |       |
+| RADCAL_ID                   | Character   | Section 12.1.5   |          |       |
+| RAMP_CP                     | Character   | Section 12.1.2   |          |       |
+| RAMP_CP_L                   | Character   | Section 15.3.1   |          |       |
+| RAMP_D                      | Character   | Section 12.1.2   |          |       |
+| RAMP_G_F                    | Character   | Section 12.1.2   |          |       |
+| RAMP_K                      | Character   | Section 12.1.2   |          |       |
+| RAMP_MU                     | Character   | Section 12.1.2   |          |       |
+| REFERENCE_ENTHALPY          | Real        | Section 12.1.2   |          |       |
+| REFERENCE_TEMPERATURE       | Real        | Section 12.1.2   | kJ/kg    | 25.   |
+| SIGMALJ                     | Real        | Section 12.1.2   | ℃        | 0     |
+| SPEC_ID(:)                  | Char. Array | Section 12.2     |          |       |
+| SPECIFIC_HEAT               | Real        | Section 12.1.2   | kJ/(kgK) |       |
+| SPECIFIC_HEAT_LIQUID        | Real        | Section 15.3.1   | kJ/(kgK) |       |
+| THERMOPHORETIC_DIAMETER     | Real        | Section 13.4     | m        |       |
+| TURBULENT_SCHMIDT_NUMBER    | Real        | Section 12.1.2   |          | 0.5   |
+| VAPORIZATION_TEMPERATURE    | Real        | Section 15.3.1   | ℃        |       |
+| VISCOSITY                   | Real        | Section 12.1.2   | kg/(ms)  |       |
+| VISCOSITY_LIQUID            | Real        | Section 15.3.1   | kg/(ms)  |       |
+| VOLUME_FRACTION(:)          | Real Array  | Section 12.2     |          |       |
+
+## SURF (Surface Properties)
+
+<center>Table 23.32: For more information see Section 7.1.</center>
+
+| Keyword                             | Type           | Description    | Units    | Default     |
+| ----------------------------------- | -------------- | -------------- | -------- | ----------- |
+| ADIABATIC                           | Logical        | Section 8.2.3  |          | F           |
+| AREA_MULTIPLIER                     | Real           | Section 9.1.2  |          | 1           |
+| BACKING                             | Character      | Section 8.3.3  |          | ’EXPOSED’   |
+| BLOWING                             | Logical        | Section 8.2.2  |          |             |
+| BURN_AWAY                           | Logical        | Section 9.2.8  |          | F           |
+| BURN_DURATION                       | Real           | Section 9.2.7  | s        | 1000000     |
+| CELL_SIZE(:)                        | Real Array     | Section 8.3.8  | m        |             |
+| CELL_SIZE_FACTOR(:)                 | Real Array     | Section 8.3.8  |          | 1           |
+| COLOR                               | Character      | Section 7.5    |          |             |
+| CONVECTION_LENGTH_SCALE             | Real           | Section 8.2.2  | m        | 1           |
+| CONVECTIVE_HEAT_FLUX                | Real           | Section 8.2.2  | kW/m2    |             |
+| CONVERT_VOLUME_TO_MASS              | Logical        | Section 10.1.6 |          | F           |
+| DEFAULT                             | Logical        | Section 7.1    |          | F           |
+| DELTA_TMP_MAX                       | Real           | Section 8.3.8  | ◦C       | 10          |
+| DRAG_COEFFICIENT                    | Real           | Section 17.3   |          | 2.8         |
+| DT_INSERT                           | Real           | Section 15.5.1 | s        | 0.01        |
+| E_COEFFICIENT                       | Real           | Section 15.7   | m2/(kgs) |             |
+| EMBER_GENERATION_HEIGHT(2)          | Real           | Section 17.5.2 | m        |             |
+| EMBER_IGNITION_POWER_MEAN           | Real           | Section 17.5.3 | kW       |             |
+| EMBER_IGNITION_POWER_SIGMA          | Real           | Section 17.5.3 | kW       | 0.001       |
+| EMBER_TRACKING_RATIO                | Real           | Section 17.5.2 | 100      |             |
+| EMBER_YIELD                         | Real           | Section 17.5.2 | kg/kg    |             |
+| EMISSIVITY                          | Real           | Section 8.2.2  | 0.9      |             |
+| EMISSIVITY_BACK                     | Real           | Section 8.3.3  |          |             |
+| EXTERNAL_FLUX                       | Real           | Section 9.3    | kW/m2    |             |
+| EXTINCTION_TEMPERATURE              | Real           | Section 9.1.3  | ◦C       | -273        |
+| FREE_SLIP                           | Logical        | Section 10.1.7 |          | F           |
+| GEOMETRY                            | Character      | Section 8.3.7  |          | ’CARTESIAN’ |
+| HEAT_OF_VAPORIZATION                | Real           | Section 9.1.3  | kJ/kg    |             |
+| HEAT_TRANSFER_COEFFICIENT           | Real           | Section 8.2.2  | W/(m2K)  |             |
+| HEAT_TRANSFER_COEFFICIENT_BACK      | Real           | Section 8.2.2  | W/(m2K)  |             |
+| HEAT_TRANSFER_MODEL                 | Character      | Section 8.2.2  |          |             |
+| HORIZONTAL                          | Logical        | Section 8.3.7  |          | F           |
+| HRRPUA                              | Real           | Section 9.1    | kW/m2    |             |
+| HT3D                                | Logical        | Section 8.4    |          | F           |
+| ID                                  | Character      | Section 7.1    |          |             |
+| IGNITION_TEMPERATURE                | Real           | Section 9.1.3  | ◦C       | 5000        |
+| INERT_Q_REF                         | Logical        | Section 9.1.4  |          | F           |
+| INIT_IDS                            | Char. Array    | Section 17.2.1 |          |             |
+| INIT_PER_AREA                       | Real           | Section 17.2.1 | m−2      |             |
+| INNER_RADIUS                        | Real           | Section 15.4.1 | m        |             |
+| INTERNAL_HEAT_SOURCE                | Real Array     | Section 8.3.6  | kW/m3    |             |
+| LAYER_DIVIDE                        | Real           | Section 8.3.5  |          | N_LAYERS/2  |
+| LEAK_PATH                           | Int. Pair      | Section 10.3.2 |          |             |
+| LEAK_PATH_ID                        | Character Pair | Section 10.3.2 |          |             |
+| LENGTH                              | Real           | Section 15.4.1 | m        |             |
+| MASS_FLUX(:)                        | Real Array     | Section 10.1.6 | kg/(m2s) |             |
+| MASS_FLUX_TOTAL                     | Real           | Section 10.1.2 | kg/(m2s) |             |
+| MASS_FLUX_VAR                       | Real           | Section 10.1.9 |          |             |
+| MASS_FRACTION(:)                    | Real Array     | Section 10.1.6 |          |             |
+| MASS_PER_VOLUME(:)                  | Real Array     | Section 17.2   | kg/m3    |             |
+| MASS_TRANSFER_COEFFICIENT           | Real           | Section 9.2.6  | m/s      |             |
+| MATL_ID(:,:)                        | Char. Array    | Section 9.2    |          |             |
+| MATL_MASS_FRACTION(:,:)             | Real Array     | Section 9.2    |          |             |
+| MAXIMUM_SCALING_HEAT_FLUX           | Real           | Section 9.1.4  | kW/m2    |             |
+| MINIMUM_BURNOUT_TIME                | Real           | Section 17.3.1 | s        | 1000000     |
+| MINIMUM_LAYER_THICKNESS             | Real           | Section 8.3.8  | m        | 1.00E-04    |
+| MINIMUM_SCALING_HEAT_FLUX           | Real           | Section 9.1.4  | kW/m2    | 0           |
+| MLRPUA                              | Real           | Section 9.1    | kg/(m2s) |             |
+| MOISTURE_FRACTION(:)                | Real Array     | Section 17.2   |          | 0           |
+| N_LAYER_CELLS_MAX(:)                | Integer Array  | Section 8.3.8  |          | 1000        |
+| NEAR_WALL_EDDY_VISCOSITY            | Real           | Section 19.2   | m2/s     |             |
+| NEAR_WALL_TURBULENCE_MODEL          | Character      | Section 19.2   |          |             |
+| NET_HEAT_FLUX                       | Real           | Section 8.2.2  | kW/m2    |             |
+| NO_SLIP                             | Logical        | Section 10.1.7 |          | F           |
+| NPPC                                | Integer        | Section 15.5.1 |          | 1           |
+| NUSSELT_C0                          | Real           | Section 8.2.2  |          |             |
+| NUSSELT_C1                          | Real           | Section 8.2.2  |          |             |
+| NUSSELT_C2                          | Real           | Section 8.2.2  |          |             |
+| NUSSELT_M                           | Real           | Section 8.2.2  |          |             |
+| PARTICLE_EXTRACTION_VELOCITY        | Real           | Section 15.6   | m/s      |             |
+| PARTICLE_MASS_FLUX                  | Real           | Section 15.5.1 | kg/(m2s) |             |
+| PARTICLE_SURFACE_DENSITY            | Real           | Section 15.5.1 | kg/m2    |             |
+| PART_ID                             | Character      | Section 15.5.1 |          |             |
+| PLE                                 | Real           | Section 16.5   |          | 0.3         |
+| PROFILE                             | Character      | Section 10.5   |          |             |
+| RADIUS                              | Real           | Section 15.4.1 | m        |             |
+| RAMP_EF                             | Character      | Section 11.1   |          |             |
+| RAMP_HEAT_TRANSFER_COEFFICIENT      | Real           | Section 8.2.2  |          |             |
+| RAMP_HEAT_TRANSFER_COEFFICIENT_BACK | Real           | Section 8.2.2  |          |             |
+| RAMP_MF(:)                          | Character      | Section 11.1   |          |             |
+| RAMP_PART                           | Character      | Section 11.1   |          |             |
+| RAMP_Q                              | Character      | Section 11.1   |          |             |
+| RAMP_T                              | Character      | Section 11.1   |          |             |
+| RAMP_T_I                            | Character      | Section 8.3.4  |          |             |
+| RAMP_TMP_BACK                       | Character      | Section 8.3.9  |          |             |
+| RAMP_TMP_GAS_BACK                   | Character      | Section 8.3.3  |          |             |
+| RAMP_TMP_GAS_FRONT                  | Character      | Section 8.3.3  |          |             |
+| RAMP_V                              | Character      | Section 11.1   |          |             |
+| RAMP_V_X                            | Character      | Section 11.3   |          |             |
+| RAMP_V_Y                            | Character      | Section 11.3   |          |             |
+| RAMP_V_Z                            | Character      | Section 11.3   |          |             |
+| REFERENCE_HEAT_FLUX                 | Real Array     | Section 9.1.4  | kW/m2    |             |
+| REFERENCE_HEAT_FLUX_TIME_INTERVAL   | Real           | Section 9.1.4  | s        | 1           |
+| REFERENCE_THICKNESS                 | Real Array     | Section 9.1.4  | m        |             |
+| RENODE_DELTA_T                      | Real           | Section 8.3.8  | K        | 2           |
+| RGB(3)                              | Integer Array  | Section 7.5    |          | 255,204,102 |
+| ROUGHNESS                           | Real           | Section 10.1.7 | m        | 0           |
+| SHAPE_FACTOR                        | Real           | Section 17.3   |          | 0.25        |
+| SPEC_ID                             | Character      | Section 10.1.6 |          |             |
+| SPREAD_RATE                         | Real           | Section 9.1.1  | m/s      |             |
+| STRETCH_FACTOR(:)                   | Real Array     | Section 8.3.8  |          | 2           |
+| SURFACE_VOLUME_RATIO(:)             | Real           | Section 17.2   | 1/m      |             |
+| TAU_EF                              | Real           | Section 11.1   | s        | 1           |
+| TAU_MF(:)                           | Real Array     | Section 11.1   | s        | 1           |
+| TAU_PART                            | Real           | Section 11.1   | s        | 1           |
+| TAU_Q                               | Real           | Section 11.1   | s        | 1           |
+| TAU_T                               | Real           | Section 11.1   | s        | 1           |
+| TAU_V                               | Real           | Section 11.1   | s        | 1           |
+| TEXTURE_HEIGHT                      | Real           | Section 7.5.2  | m        | 1           |
+| TEXTURE_MAP                         | Character      | Section 7.5.2  |          |             |
+| TEXTURE_WIDTH                       | Real           | Section 7.5.2  | m        | 1           |
+| TGA_ANALYSIS                        | Logical        | Section 9.3.2  |          | F           |
+| TGA_FINAL_TEMPERATURE               | Real           | Section 9.3.2  | ◦C       | 800         |
+| TGA_HEATING_RATE                    | Real           | Section 9.3.2  | ◦C/min   | 5           |
+| THICKNESS(:)                        | Real Array     | Section 8.1    | m        |             |
+| TIME_STEP_FACTOR                    | Real           | Section 8.3.8  |          | 10          |
+| TMP_BACK                            | Real           | Section 8.3.9  | ◦C       |             |
+| TMP_FRONT                           | Real           | Section 8.2.1  | ◦C       | 20          |
+| TMP_FRONT_INITIAL                   | Real           | Section 8.2.3  | ◦C       |             |
+| TMP_GAS_FRONT                       | Real           | Section 8.3.3  | ◦C       |             |
+| TMP_GAS_BACK                        | Real           | Section 8.3.3  | ◦C       |             |
+| TMP_INNER                           | Real           | Section 8.3.4  | ◦C       | 20          |
+| TRANSPARENCY                        | Real           | Section 7.5    |          | 1           |
+| VARIABLE_THICKNESS                  | Logical        | Section 8.4.5  |          | F           |
+| VEG_LSET_BETA                       | Real           | Section 17.5   |          | 0           |
+| VEG_LSET_CHAR_FRACTION              | Real           | Section 17.5   |          | 0.2         |
+| VEG_LSET_FIREBASE_TIME              | Real           | Section 17.5   | s        |             |
+| VEG_LSET_FUEL_INDEX                 | Integer        | Section 17.5   |          |             |
+| VEG_LSET_HT                         | Real           | Section 17.5   |          | 0           |
+| VEG_LSET_IGNITE_TIME                | Real           | Section 17.5   | s        |             |
+| VEG_LSET_M1                         | Real           | Section 17.5   |          | 0.03        |
+| VEG_LSET_M10                        | Real           | Section 17.5   |          | 0.04        |
+| VEG_LSET_M100                       | Real           | Section 17.5   |          | 0.05        |
+| VEG_LSET_MLW                        | Real           | Section 17.5   |          | 0.7         |
+| VEG_LSET_MLH                        | Real           | Section 17.5   |          | 0.7         |
+| VEG_LSET_QCON                       | Real           | Section 17.5   | kW/m2    | 0           |
+| VEG_LSET_ROS_00                     | Real           | Section 17.5   | m/s      | 0           |
+| VEG_LSET_ROS_BACK                   | Real           | Section 17.5   | m/s      | 0           |
+| VEG_LSET_ROS_FLANK                  | Real           | Section 17.5   | m/s      | 0           |
+| VEG_LSET_ROS_HEAD                   | Real           | Section 17.5   | m/s      | 0           |
+| VEG_LSET_SIGMA                      | Real           | Section 17.5   | 1/m      | 0           |
+| VEG_LSET_SURF_LOAD                  | Real           | Section 17.5   | kg/m2    | 0.3         |
+| VEG_LSET_TAN2                       | Real           | Section 17.5   |          |             |
+| VEG_LSET_WIND_EXP                   | Real           | Section 17.5   |          | 1           |
+| VEL                                 | Real           | Section 10.1   | m/s      |             |
+| VEL_BULK                            | Real           | Section 10.5   | m/s      |             |
+| VEL_GRAD                            | Real           | Section 10.1.5 | 1/s      |             |
+| VEL_PART                            | Real           | Section 15.5.1 | m/s      |             |
+| VEL_T(2)                            | Real Array     | Section 10.1.4 | m/s      |             |
+| VOLUME_FLOW                         | Real           | Section 10.1   | m3/s     |             |
+| WIDTH                               | Real           | Section 15.4.1 | m        |             |
+| XYZ(3)                              | Real Array     | Section 9.1.1  | m        |             |
+| Z0                                  | Real           | Section 16.5   | m        | 10          |
+| Z_0                                 | Real           | Section 16.2.2 | m        | 0           |
+
+## TABL (Table Parameters)
+
+<center>Table 23.33: For more information see Section 18.3.1.</center>
+
+| Keyword       | Type       | Description    | Units | Default |
+| ------------- | ---------- | -------------- | ----- | ------- |
+| IDADIABATIC   | Character  | Section 18.3.1 |       |         |
+| TABLE_DATA(9) | Real Array | Section 18.3.1 |       |         |
+
+## TIME (Time Parameters)
+
+<center>Table 23.34: For more information see Section 6.2.</center>
+
+| 可输入参数         | 类型    | 描述          | 单位 | 默认          |
+| ------------------ | ------- | ------------- | ---- | ------------- |
+| DT                 | Real    | Section 6.2.2 | s    |               |
+| DT_END_FILL        | Real    | Section 6.2.2 | s    | $1.0×10^{−6}$ |
+| DT_END_MINIMUM     | Real    | Section 6.2.2 | s    | 2.*EPSILON    |
+| DT_EXTERNAL        | Real    | Section 18.8  | s    | 0             |
+| LIMITING_DT_RATIO  | Real    | Section 4.2   |      | 0.0001        |
+| LOCK_TIME_STEP     | Logical | Section 6.2.2 |      | F             |
+| RESTRICT_TIME_STEP | Logical | Section 6.2.2 |      | T             |
+| T_BEGIN            | Real    | Section 6.2.1 | s    | 0.            |
+| T_END              | Real    | Section 6.2.1 | s    | 1.            |
+| TIME_SHRINK_FACTOR | Real    | Section 6.2.3 |      | 1.            |
+| WALL_INCREMENT     | Integer | Section 8.3.8 |      | 2             |
+
+## TRNX, TRNY, TRNZ (MESH Transformations)
+
+<center>Table 23.35: For more information see Section 6.3.5.</center>
+
+| 可输入参数  | 类型      | 描述          | 单位 | 默认 |
+| ----------- | --------- | ------------- | ---- | ---- |
+| CC          | Real      | Section 6.3.5 | m    |      |
+| ID          | Character | Section 6.3.5 |      |      |
+| IDERIV      | Integer   | Section 6.3.5 |      |      |
+| MESH_NUMBER | Integer   | Section 6.3.5 |      |      |
+| PC          | Real      | Section 6.3.5 |      |      |
+
+## VENT (Vent Parameters)
+
+<center>Table 23.36: For more information see Section 7.4.</center>
+
+| 可输入参数           | 类型          | 描述           | 单位      | 默认       |
+| -------------------- | ------------- | -------------- | --------- | ---------- |
+| COLOR                | 字符型        | Section 7.5    |           |            |
+| CTRL_ID              | 字符型        | Section 18.4.2 |           |            |
+| DB                   | 字符型        | Section 7.4.1  |           |            |
+| DEVC_ID              | 字符型        | Section 18.4.2 |           |            |
+| DYNAMIC_PRESSURE     | Real          | Section 10.4   | Pa        | 0.         |
+| GEOM                 | Logical       | Section 17.5   |           | F          |
+| ID                   | 字符型        | Section 7.4.1  |           |            |
+| IOR                  | Integer       | Section 7.4.4  |           |            |
+| L_EDDY               | Real          | Section 10.1.8 | m         | 0.         |
+| L_EDDY_IJ(3,3)       | Real Array    | Section 10.1.8 | m         | 0.         |
+| MB                   | 字符型        | Section 7.4.1  |           |            |
+| MULT_ID              | 字符型        | Section 7.6    |           |            |
+| N_EDDY               | Integer       | Section 10.1.8 |           | 0          |
+| OBST_ID              | 字符型        | Section 18.4.2 |           |            |
+| OUTLINE              | Logical       | Section 7.4.1  |           | F          |
+| PBX, PBY, PBZ        | Real          | Section 7.4.1  |           |            |
+| PRESSURE_RAMP        | 字符型        | Section 10.4   |           |            |
+| RADIUS               | Real          | Section 7.4.2  | m         |            |
+| REYNOLDS_STRESS(3,3) | Real Array    | Section 10.1.8 | $m^2/s^2$ | 0.         |
+| RGB(3)               | Integer Array | Section 7.5    |           |            |
+| SPREAD_RATE          | Real          | Section 9.1.1  | m/s       | 0.05       |
+| SURF_ID              | 字符型        | Section 7.4.1  |           | ’INERT’    |
+| TEXTURE_ORIGIN(3)    | Real Array    | Section 7.5.2  | m         | (0.,0.,0.) |
+| TMP_EXTERIOR         | Real          | Section 7.4.2  | ℃         |            |
+| TMP_EXTERIOR_RAMP    | 字符型        | Section 7.4.2  |           |            |
+| TRANSPARENCY         | Real          | Section 7.5    |           | 1.0        |
+| UVW(3)               | Real Array    | Section 10.2.7 |           |            |
+| VEL_RMS              | Real          | Section 10.1.8 | m/s       | 0.         |
+| XB(6)                | Real Array    | Section 7.4.1  | m         |            |
+| XYZ(3)               | Real Array    | Section 9.1.1  | m         |            |
+
+## WIND (Wind and Atmospheric Parameters)
+
+<center>Table 23.37: For more information see Section 16.2.</center>
+
+| Keyword                       | Type      | Description         | Units   | Default |
+| ----------------------------- | --------- | ------------------- | ------- | ------- |
+| CORIOLIS_VECTOR(3)            | Real      | Section 16.3.2      |         | 0       |
+| DIRECTION                     | Real      | Section 16.2        | degrees | 270     |
+| FORCE_VECTOR(3)               | Real      | Section 16.3.1      | Pa/m    | 0       |
+| GEOSTROPHIC_WIND(2)           | Real      | Section 16.3.3      | m/s     |         |
+| GROUND_LEVEL                  | Real      | Section 16.5        | m       | 0       |
+| INITIAL_SPEED                 | Real      | Section 16.3.1      | m/s     | 0       |
+| L                             | Real      | Section 16.2        | m       | 0       |
+| LAPSE_RATE                    | Real      | Section 16.5        | ◦C/m    | 0       |
+| LATITUDE                      | Real      | Section 16.3.2      | degrees |         |
+| PRESSURE_GRADIENT_FORCE       | Real      | Section 16.3.1      | Pa/m    |         |
+| RAMP_DIRECTION_T              | Character | Section 16.2        |         |         |
+| RAMP_DIRECTION_Z              | Character | Section 16.2        |         |         |
+| RAMP_FVX_T                    | Character | Section 16.3.1      |         |         |
+| RAMP_FVY_T                    | Character | Section 16.3.1      |         |         |
+| RAMP_FVZ_T                    | Character | Section 16.3.1      |         |         |
+| RAMP_PGF_T                    | Character | Section 16.3.1      |         |         |
+| RAMP_SPEED_T                  | Character | Section 16.1        |         |         |
+| RAMP_SPEED_Z                  | Character | Section 16.1        |         |         |
+| RAMP_TMP0_Z                   | Character | Section 16.5        |         |         |
+| SIGMA_THETA                   | Real      | Section 16.1        | degrees |         |
+| SPEED                         | Real      | Section 16.2        | m/s     | 0       |
+| STRATIFICATION                | Logical   | Section 16.5        | T       |         |
+| TAU_THETA                     | Real      | Section 16.1        | s       | 300     |
+| THETA_STAR                    | Real      | Section 16.2        | K       |         |
+| TMP_REF                       | Real      | Section 16.2        | ◦C      | TMPA    |
+| U_STAR                        | Real      | Section 16.2        | m/s     |         |
+| U0,V0,W0                      | Reals     | Section 16.2        | m/s     | 0       |
+| USE_ATMOSPHERIC_INTERPOLATION | Logical   | FDS Tech Guide[^29] |         | T       |
+| Z_0                           | Real      | Section 16.2        | m       | 0.03    |
+| Z_REF                         | Real      | Section 16.2        | m       | 2       |
+
+## ZONE (Pressure Zone Parameters)
+
+<center>Table 23.38: For more information see Section 10.3.</center>
+
+| Keyword                    | Type       | Description    | Units | Default |
+| -------------------------- | ---------- | -------------- | ----- | ------- |
+| DISCHARGE_COEFFICIENT(N)   | Real       | Section 10.3.2 |       | 1.      |
+| ID                         | Character  | Section 10.3.1 |       |         |
+| LEAK_AREA(N)               | Real       | Section 10.3.2 | $m^2$ | 0       |
+| LEAK_PRESSURE_EXPONENT(N)  | Real       | Section 10.3.2 |       | 0.5     |
+| LEAK_REFERENCE_PRESSURE(N) | Real       | Section 10.3.2 | Pa    | 4       |
+| XYZ(3,:)                   | Real Array | Section 10.3.1 | m     |         |
 
 # Error Codes
 
@@ -8631,6 +10561,12 @@ ENDDO
 [^75]:U. Wickström, D. Duthinh, and K.B. McGrattan. Adiabatic Surface Temperature for Calculating Heat Transfer to Fire Exposed Structures. In Proceedings of the Eleventh International Interflam Conference. Interscience Communications, London, 2007. 371
 [^76]:M. Malendowski. Analytical Solution for Adiabatic Surface Temperature (AST). Fire Technology, 53:413–420, 2017. 371
 [^77]:D.A. Purser. SFPE Handbook of Fire Protection Engineering, chapter Combustion Toxicity. Springer, New York, 5th edition, 2016. 378, 379
+[^78]:J.G. Slowik, K. Stainken, P. Davidovits, L.R. Williams, J.T. Jayne, C.E. Kolb, D.R. Worsnop, Y. Rudich, P.F. DeCarlo, and J.L. Jimenez. Particle Morphology and Density Characterization by Combined Mobility and Aerodynamic Diameter Measurements. Part 2: Application to Combustion- Generated Soot Aerosols as a Function of Fuel Equivalence Ratio. Aerosol Science and Technology, 38:1206–1222, 2004. 382
+[^79]:S.B. Pope. Ten questions concerning the large-eddy simulation of turbulent flows. New Journal of Physics, 6:1–24, 2004. 383
+[^80]:R. McDermott, G. Forney, K. McGrattan, and W. Mell. Fire Dynamics Simulator 6: Complex Geometry, Embedded Meshes, and Quality Assessment. In J.C.F. Pereira and A. Sequeira, editors, V European Conference on Computational Fluid Dynamics, Lisbon, Portugal, 2010. ECCOMAS. 384, 386
+[^81]:Y. Nievergelt. Wavelets Made Easy. Birkhäuser, 1999. 384
+[^82]:K. Schneider and O. Vasilyev. Wavelet methods in computational fluid dynamics. Annu. Rev. Fluid Mech., 42:473–503, 2010. 384
+[^83]:
 # 工业界的咨询资源【网站】
 
 - 私立或工业机构：
