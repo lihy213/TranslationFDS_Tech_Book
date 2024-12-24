@@ -455,7 +455,7 @@ THICKNESS = 0.0063 /
 
 <center>Table 5.1: Namelist Group Reference Table</center>
 
-![QQ_1725364980152](/../FUG6.9.1翻译.assets/QQ_1725364980152.png)
+![QQ_1725364980152](../FUG6.9.1翻译.assets/QQ_1725364980152.png)
 
 ## Concatenating Input Files
 
