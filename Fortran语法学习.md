@@ -1439,3 +1439,9 @@ $ \tilde{p}_{ijk}/\rho_{ijk} + |\mathbf{u}|^2_{ijk}/2 $
 
 $\mu(T,\mathbf{u})$ or $\mu(T^*,\mathbf{u}^*)$
 
+
+
+
+
+
+
